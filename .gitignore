@@ -1,0 +1,35 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Go
+bin/
+coverage.out
+*.test
+
+# Node
+node_modules/
+dist/
+.vite/
+coverage/
+
+# Runtime state
+.agentbox/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.log
+
+# IDE and OS
+.DS_Store
+.idea/
+.vscode/
+
+# Temporary
+.tmp/
+tmp/
