@@ -1,0 +1,25 @@
+package events
+
+const (
+	RuntimeStarting   = "runtime.starting"
+	RuntimeReady      = "runtime.ready"
+	RuntimeExited     = "runtime.exited"
+	RunStarted        = "run.started"
+	RunCompleted      = "run.completed"
+	RunFailed         = "run.failed"
+	MessageStarted    = "message.started"
+	MessageDelta      = "message.delta"
+	MessageCompleted  = "message.completed"
+	ToolStarted       = "tool.started"
+	ToolProgress      = "tool.progress"
+	ToolCompleted     = "tool.completed"
+	ToolFailed        = "tool.failed"
+	SubagentStarted   = "subagent.started"
+	SubagentProgress  = "subagent.progress"
+	SubagentCompleted = "subagent.completed"
+	TodoUpdated       = "todo.updated"
+	ApprovalRequested = "approval.requested"
+	ApprovalResolved  = "approval.resolved"
+	ArtifactCreated   = "artifact.created"
+	Notice            = "notice"
+)

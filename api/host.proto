@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package agentbox.v1;
+
+option go_package = "agentbox/gen/host/v1;hostv1";
+
+service HostService {
+  rpc Connect(stream HostFrame) returns (stream ServerFrame);
+}
+
+message HostFrame {
+  string frame_id = 1;
+  uint64 host_seq = 2;
+  oneof payload {
+    HostHello hello = 10;
+    Heartbeat heartbeat = 11;
+    CommandAck command_ack = 12;
+    RuntimeEvent runtime_event = 13;
+    RuntimeSnapshot runtime_snapshot = 14;
+    ArtifactReady artifact_ready = 15;
+  }
+}
+
+message ServerFrame {
+  string frame_id = 1;
+  oneof payload {
+    Welcome welcome = 10;
+    HostCommand command = 11;
+    EventAck event_ack = 12;
+    ConfigUpdate config_update = 13;
+    Ping ping = 14;
+  }
+}
+
+message HostHello {
+  string host_id = 1;
+  string enrollment_token = 2;
+  string credential = 3;
+  string daemon_instance_id = 4;
+  string daemon_version = 5;
+  string os = 6;
+  string arch = 7;
+  uint64 last_acked_host_seq = 8;
+  repeated RuntimeCapability runtimes = 9;
+  repeated WorkspaceRoot workspace_roots = 10;
+}
+
+message RuntimeCapability {
+  string name = 1;
+  string version = 2;
+  string binary_path = 3;
+  string status = 4;
+  bytes capabilities_json = 5;
+}
+
+message WorkspaceRoot {
+  string path = 1;
+  string real_path = 2;
+  string mode = 3;
+}
+
+message Heartbeat {
+  int64 unix_millis = 1;
+  int32 active_boxes = 2;
+  double cpu_percent = 3;
+  uint64 memory_bytes = 4;
+  uint64 disk_free_bytes = 5;
+}
+
+message CommandAck {
+  string command_id = 1;
+  CommandStage stage = 2;
+  string error_code = 3;
+  string error_message = 4;
+  bytes result_json = 5;
+}
+
+enum CommandStage {
+  COMMAND_STAGE_UNSPECIFIED = 0;
+  COMMAND_STAGE_ACCEPTED = 1;
+  COMMAND_STAGE_STARTED = 2;
+  COMMAND_STAGE_COMPLETED = 3;
+  COMMAND_STAGE_FAILED = 4;
+  COMMAND_STAGE_CANCELLED = 5;
+}
+
+message RuntimeEvent {
+  string daemon_event_id = 1;
+  string box_id = 2;
+  string run_id = 3;
+  string runtime_instance_id = 4;
+  uint64 runtime_seq = 5;
+  string event_type = 6;
+  string actor_kind = 7;
+  string actor_id = 8;
+  int64 occurred_unix_millis = 9;
+  bytes payload_json = 10;
+}
+
+message RuntimeSnapshot {
+  repeated RuntimeProcess processes = 1;
+}
+
+message RuntimeProcess {
+  string runtime_instance_id = 1;
+  string box_id = 2;
+  string runtime_type = 3;
+  string runtime_version = 4;
+  string status = 5;
+  int64 process_id = 6;
+  string session_ref = 7;
+  bytes capabilities_json = 8;
+}
+
+message ArtifactReady {
+  string artifact_id = 1;
+  string box_id = 2;
+  string run_id = 3;
+  string name = 4;
+  string path = 5;
+  string mime_type = 6;
+  uint64 size_bytes = 7;
+  string sha256 = 8;
+}
+
+message Welcome {
+  string host_id = 1;
+  string credential = 2;
+  uint64 last_acked_host_seq = 3;
+  int64 heartbeat_interval_millis = 4;
+}
+
+message HostCommand {
+  string command_id = 1;
+  string idempotency_key = 2;
+  string box_id = 3;
+  string run_id = 4;
+  string runtime_instance_id = 5;
+  string command_type = 6;
+  bytes payload_json = 7;
+  int64 created_unix_millis = 8;
+}
+
+message EventAck {
+  uint64 last_acked_host_seq = 1;
+}
+
+message ConfigUpdate {
+  int32 max_active_boxes = 1;
+  int64 max_run_duration_seconds = 2;
+}
+
+message Ping {
+  int64 unix_millis = 1;
+}

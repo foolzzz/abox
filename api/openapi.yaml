@@ -1,0 +1,335 @@
+openapi: 3.1.0
+info:
+  title: Agent Box API
+  version: 0.1.0
+servers:
+  - url: /api/v1
+security:
+  - tailscaleIdentity: []
+paths:
+  /meta:
+    get:
+      operationId: getMeta
+      responses:
+        '200':
+          description: Server metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Meta'}
+  /agents:
+    get:
+      operationId: listAgents
+      responses:
+        '200':
+          description: Agent definitions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Agent'}
+    post:
+      operationId: createAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateAgentRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Agent'}
+  /hosts:
+    get:
+      operationId: listHosts
+      responses:
+        '200':
+          description: Hosts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Host'}
+  /workspaces:
+    get:
+      operationId: listWorkspaces
+      responses:
+        '200':
+          description: Workspaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Workspace'}
+    post:
+      operationId: createWorkspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateWorkspaceRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Workspace'}
+  /boxes:
+    get:
+      operationId: listBoxes
+      responses:
+        '200':
+          description: Boxes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Box'}
+    post:
+      operationId: createBox
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateBoxRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Box'}
+  /boxes/{boxId}:
+    parameters:
+      - {$ref: '#/components/parameters/BoxId'}
+    get:
+      operationId: getBox
+      responses:
+        '200':
+          description: Box snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BoxSnapshot'}
+  /boxes/{boxId}/messages:
+    parameters:
+      - {$ref: '#/components/parameters/BoxId'}
+    get:
+      operationId: listMessages
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Message'}
+    post:
+      operationId: sendMessage
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SendMessageRequest'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Message'}
+  /boxes/{boxId}/events:
+    parameters:
+      - {$ref: '#/components/parameters/BoxId'}
+    get:
+      operationId: streamBoxEvents
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          schema: {type: integer, format: int64}
+      responses:
+        '200':
+          description: Server-sent event stream
+          content:
+            text/event-stream:
+              schema: {type: string}
+  /boxes/{boxId}/interrupt:
+    parameters:
+      - {$ref: '#/components/parameters/BoxId'}
+    post:
+      operationId: interruptBox
+      responses:
+        '202': {description: Accepted}
+  /boxes/{boxId}/stop:
+    parameters:
+      - {$ref: '#/components/parameters/BoxId'}
+    post:
+      operationId: stopBox
+      responses:
+        '202': {description: Accepted}
+  /boxes/{boxId}/resume:
+    parameters:
+      - {$ref: '#/components/parameters/BoxId'}
+    post:
+      operationId: resumeBox
+      responses:
+        '202': {description: Accepted}
+  /approvals:
+    get:
+      operationId: listApprovals
+      responses:
+        '200':
+          description: Pending approvals
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Approval'}
+  /approvals/{approvalId}/decision:
+    parameters:
+      - name: approvalId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      operationId: decideApproval
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: {enum: [approved, denied]}
+      responses:
+        '200':
+          description: Resolved
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Approval'}
+components:
+  securitySchemes:
+    tailscaleIdentity:
+      type: apiKey
+      in: header
+      name: Tailscale-User-Login
+  parameters:
+    BoxId:
+      name: boxId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  schemas:
+    Meta:
+      type: object
+      required: [serverVersion, apiVersion]
+      properties:
+        serverVersion: {type: string}
+        apiVersion: {type: string}
+        minDaemonVersion: {type: string}
+    Agent:
+      type: object
+      required: [id, name, runtimeType, version]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        runtimeType: {enum: [omp, claude, acp]}
+        version: {type: integer}
+        model: {type: [string, 'null']}
+        systemPrompt: {type: string}
+    CreateAgentRequest:
+      type: object
+      required: [name, runtimeType, systemPrompt]
+      properties:
+        name: {type: string}
+        runtimeType: {enum: [omp, claude, acp]}
+        model: {type: [string, 'null']}
+        systemPrompt: {type: string}
+    Host:
+      type: object
+      required: [id, name, status, runtimes]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        status: {enum: [enrolling, online, draining, offline, revoked]}
+        runtimes:
+          type: array
+          items: {type: string}
+    Workspace:
+      type: object
+      required: [id, hostId, name, path, status]
+      properties:
+        id: {type: string, format: uuid}
+        hostId: {type: string, format: uuid}
+        name: {type: string}
+        path: {type: string}
+        status: {enum: [provisioning, ready, error, archived]}
+    CreateWorkspaceRequest:
+      type: object
+      required: [hostId, name, path]
+      properties:
+        hostId: {type: string, format: uuid}
+        name: {type: string}
+        path: {type: string}
+    Box:
+      type: object
+      required: [id, name, agentId, hostId, workspaceId, status]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        agentId: {type: string, format: uuid}
+        hostId: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        status: {type: string}
+        runtimeType: {type: string}
+        updatedAt: {type: string, format: date-time}
+    CreateBoxRequest:
+      type: object
+      required: [name, agentId, hostId, workspaceId]
+      properties:
+        name: {type: string}
+        agentId: {type: string, format: uuid}
+        hostId: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+    BoxSnapshot:
+      allOf:
+        - {$ref: '#/components/schemas/Box'}
+        - type: object
+          properties:
+            activeRunId: {type: [string, 'null'], format: uuid}
+            lastEventSeq: {type: integer, format: int64}
+    Message:
+      type: object
+      required: [id, boxId, role, status, content, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        boxId: {type: string, format: uuid}
+        runId: {type: [string, 'null'], format: uuid}
+        authorName: {type: [string, 'null']}
+        role: {enum: [user, assistant, system]}
+        delivery: {type: [string, 'null'], enum: [prompt, steer, follow_up, null]}
+        status: {type: string}
+        content: {type: string}
+        createdAt: {type: string, format: date-time}
+    SendMessageRequest:
+      type: object
+      required: [content, delivery]
+      properties:
+        content: {type: string, minLength: 1}
+        delivery: {enum: [prompt, steer, follow_up]}
+    Approval:
+      type: object
+      required: [id, boxId, runId, toolName, riskLevel, status, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        boxId: {type: string, format: uuid}
+        runId: {type: string, format: uuid}
+        toolName: {type: string}
+        riskLevel: {enum: [low, medium, high, critical]}
+        status: {enum: [pending, approved, denied, expired, cancelled]}
+        payload: {type: object}
+        expiresAt: {type: string, format: date-time}

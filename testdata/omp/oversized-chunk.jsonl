@@ -1,0 +1,2 @@
+{"type":"ready","protocolVersion":1,"supportedProtocolVersions":[1,2],"maxFrameBytes":1048576,"maxReassembledFrameBytes":64}
+{"type":"rpc_chunk","chunkId":"rpc-too-large","index":0,"count":1,"byteLength":65,"data":"eyJ0eXBlIjoibm90aWNlIiwibWVzc2FnZSI6InRoaXMgZGVjbGFyZWQgZnJhbWUgaXMgaW50ZW50aW9uYWxseSB0b28gbGFyZ2UifQ=="}

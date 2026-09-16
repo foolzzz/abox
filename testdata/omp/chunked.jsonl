@@ -1,0 +1,5 @@
+{"type":"ready","protocolVersion":1,"supportedProtocolVersions":[1,2],"maxFrameBytes":1048576,"maxReassembledFrameBytes":67108864}
+{"id":"neg-1","type":"response","command":"negotiate_protocol","success":true,"data":{"protocolVersion":2}}
+{"type":"rpc_chunk","chunkId":"rpc-fixture-1","index":0,"count":3,"byteLength":160,"data":"eyJpZCI6InN0YXRlLTEiLCJ0eXBlIjoicmVzcG9uc2UiLCJjb21tYW5kIjoiZ2V0X3N0YXRlIiwi"}
+{"type":"rpc_chunk","chunkId":"rpc-fixture-1","index":1,"count":3,"byteLength":160,"data":"c3VjY2VzcyI6dHJ1ZSwiZGF0YSI6eyJzZXNzaW9uRmlsZSI6Ii90bXAvb21wLXNlc3Npb24uanM="}
+{"type":"rpc_chunk","chunkId":"rpc-fixture-1","index":2,"count":3,"byteLength":160,"data":"b25sIiwic2Vzc2lvbklkIjoic2Vzcy0xIiwiaXNTdHJlYW1pbmciOmZhbHNlfX0="}

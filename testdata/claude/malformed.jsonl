@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","cwd":"/workspace","session_id":"33333333-3333-4333-8333-333333333333","tools":[],"mcp_servers":[],"model":"claude-sonnet-4-6","permissionMode":"dontAsk","claude_code_version":"2.1.0","uuid":"20000000-0000-4000-8000-000000000001"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"unterminated"}]}
+{"type":"result","subtype":"success","is_error":false,"result":"must not be reached","session_id":"33333333-3333-4333-8333-333333333333","uuid":"20000000-0000-4000-8000-000000000002"}

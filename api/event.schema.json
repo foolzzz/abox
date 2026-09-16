@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentbox.local/schemas/agent-event.json",
+  "title": "AgentEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "boxId", "seq", "type", "occurredAt", "actor", "payload"],
+  "properties": {
+    "eventId": {"type": "string", "format": "uuid"},
+    "boxId": {"type": "string", "format": "uuid"},
+    "runId": {"type": ["string", "null"], "format": "uuid"},
+    "runtimeInstanceId": {"type": ["string", "null"], "format": "uuid"},
+    "seq": {"type": "integer", "minimum": 1},
+    "type": {"type": "string", "minLength": 1},
+    "occurredAt": {"type": "string", "format": "date-time"},
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["user", "main_agent", "subagent", "system", "daemon"]},
+        "id": {"type": ["string", "null"]}
+      }
+    },
+    "payload": {"type": "object"}
+  }
+}

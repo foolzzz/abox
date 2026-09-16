@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","cwd":"/workspace","session_id":"44444444-4444-4444-8444-444444444444","tools":["Bash"],"mcp_servers":[],"model":"claude-sonnet-4-6","permissionMode":"manual","claude_code_version":"2.1.0","uuid":"30000000-0000-4000-8000-000000000001"}
+{"type":"control_request","request_id":"approval-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm -rf build"},"permission_suggestions":[],"blocked_path":"/workspace/build"},"session_id":"44444444-4444-4444-8444-444444444444","uuid":"30000000-0000-4000-8000-000000000002"}
