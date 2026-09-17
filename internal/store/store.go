@@ -34,6 +34,7 @@ type Store interface {
 
 	ListBoxes(ctx context.Context, user domain.User) ([]domain.Box, error)
 	CreateBox(ctx context.Context, user domain.User, input domain.CreateBoxInput) (domain.Box, error)
+	DeleteBox(ctx context.Context, user domain.User, boxID string) (*domain.HostCommand, error)
 	GetBox(ctx context.Context, user domain.User, id string) (domain.Box, error)
 	GetBoxForHost(ctx context.Context, hostID, boxID string) (domain.Box, error)
 	SetBoxStatus(ctx context.Context, boxID string, from []domain.BoxStatus, to domain.BoxStatus) error

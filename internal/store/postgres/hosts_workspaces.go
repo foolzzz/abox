@@ -15,7 +15,8 @@ import (
 )
 
 const hostSelect = `
-    SELECT h.id, h.organization_id, h.name, h.slug, h.status, COALESCE(h.os, ''),
+    SELECT h.id, h.organization_id, h.name, h.slug, h.status,
+           COALESCE(h.system_hostname, ''), COALESCE(h.os, ''),
            COALESCE(h.arch, ''), COALESCE(h.daemon_version, ''), h.labels,
            h.last_seen_at, h.max_active_boxes,
            COALESCE(ARRAY(
@@ -103,14 +104,15 @@ func (s *Store) UpsertHost(ctx context.Context, host domain.Host, daemonInstance
 		}
 		tag, err := tx.Exec(ctx, `
             INSERT INTO hosts(
-                id, organization_id, slug, name, status, os, arch, daemon_version,
+                id, organization_id, slug, name, status, system_hostname, os, arch, daemon_version,
                 current_daemon_instance_id, last_acked_host_seq, labels,
                 max_active_boxes, last_seen_at, created_by_user_id
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),$13)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),$14)
             ON CONFLICT (id) DO UPDATE SET
                 slug = EXCLUDED.slug,
                 name = EXCLUDED.name,
                 status = CASE WHEN hosts.status = 'revoked' THEN hosts.status ELSE EXCLUDED.status END,
+				system_hostname = EXCLUDED.system_hostname,
                 os = EXCLUDED.os,
                 arch = EXCLUDED.arch,
                 daemon_version = EXCLUDED.daemon_version,
@@ -127,7 +129,7 @@ func (s *Store) UpsertHost(ctx context.Context, host domain.Host, daemonInstance
                 version = hosts.version + 1
             WHERE hosts.organization_id = EXCLUDED.organization_id`,
 			host.ID, host.OrganizationID, host.Slug, host.Name, host.Status,
-			nullableText(host.OS), nullableText(host.Arch), nullableText(host.DaemonVersion),
+			nullableText(host.SystemHostname), nullableText(host.OS), nullableText(host.Arch), nullableText(host.DaemonVersion),
 			daemonInstanceID, ack, labels, host.MaxActiveBoxes, creatorID,
 		)
 		if err != nil {
@@ -248,7 +250,7 @@ func scanHost(row scanner) (domain.Host, error) {
 	var labels []byte
 	err := row.Scan(
 		&result.ID, &result.OrganizationID, &result.Name, &result.Slug, &result.Status,
-		&result.OS, &result.Arch, &result.DaemonVersion, &labels,
+		&result.SystemHostname, &result.OS, &result.Arch, &result.DaemonVersion, &labels,
 		&result.LastSeenAt, &result.MaxActiveBoxes, &result.Runtimes,
 	)
 	if err != nil {

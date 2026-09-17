@@ -399,6 +399,28 @@ func (s *Server) handleCreateBox(writer http.ResponseWriter, request *http.Reque
 	writeJSON(writer, http.StatusCreated, box)
 }
 
+func (s *Server) handleDeleteBox(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	boxID := chi.URLParam(request, "boxID")
+	box, err := s.store.GetBox(request.Context(), user, boxID)
+	if err != nil {
+		s.writeStoreError(writer, "get box for deletion", err)
+		return
+	}
+	command, err := s.store.DeleteBox(request.Context(), user, boxID)
+	if err != nil {
+		s.writeStoreError(writer, "delete box", err)
+		return
+	}
+	s.terminateAgentTerminal(box)
+	if command != nil {
+		s.dispatch(command)
+		writer.WriteHeader(http.StatusAccepted)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleListMessages(writer http.ResponseWriter, request *http.Request) {
 	limit, err := queryLimit(request, 100, 500)
 	if err != nil {

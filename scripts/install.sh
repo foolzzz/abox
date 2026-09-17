@@ -26,6 +26,15 @@ if [ -z "${HOME:-}" ] || [ ! -d "$HOME" ]; then
   exit 1
 fi
 
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "error: tmux is required for persistent Agent Terminal sessions" >&2
+  case "$(uname -s)" in
+    Darwin) echo "install it with: brew install tmux" >&2 ;;
+    Linux) echo "install it with your package manager, for example: sudo apt install tmux" >&2 ;;
+  esac
+  exit 1
+fi
+
 normalize_target() {
   host_os=$(uname -s)
   host_arch=$(uname -m)

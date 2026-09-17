@@ -80,6 +80,7 @@
 - Credential、Journal、Runtime Session、Prompt Snapshot 均存放在该目录的受限子目录中。
 - 可通过 CLI `--config` 或环境变量仅覆盖“配置文件路径”。
 - Server 地址、Runtime Binary、并发限制、超时和 Runtime Feature Flag 来自配置文件；项目目录由用户在 Web Console 注册，不要求编辑 daemon 配置。
+- 首次启动时 daemon 在本地配置文件原子生成 `hostId` UUID；后续启动永久复用。`hostName` 是用户自定义展示名，`systemHostname` 每次从操作系统读取并同步到 Server。
 
 ### 6.3 权限
 
@@ -98,6 +99,7 @@
 
 - macOS 提供 LaunchAgent 配置和安装脚本。
 - Linux 提供 systemd Unit 和安装脚本。
+- Agent Terminal 依赖 tmux；安装脚本必须检测 tmux 并给出 macOS/Linux 安装指令。
 - 进程树停止、Workspace 路径校验、文件权限、日志路径在两个平台上行为一致。
 - 平台特有能力通过构建标签或小型 Adapter 隔离，禁止在核心业务逻辑中散布 OS 分支。
 
@@ -110,17 +112,19 @@
 - Viewer 默认只读；Operator 可以操作已分享 Box；Admin/Owner 管理 Organization 资源。
 - 所有 Prompt、Steer、Follow-up、Approval、Stop、ACL 和角色变更必须进入 Audit Log。
 
-## 9. Box 与对话
+## 9. Box、Session 与交互入口
 
-- Agent Definition、Agent Box、Execution Host 分离。
-- 创建 Agent Definition 不启动进程。
-- Box 第一次 Prompt 时按需启动 Runtime。
-- 单 Box 同一时间最多一个 Main Run。
-- Prompt 在空闲 Box 上启动新 Run。
-- Follow-up 在活跃 Run 后排队。
-- Steer 介入当前 Run。
-- 页面断开不停止 Runtime。
-- Runtime 空闲后自动 Hibernation；下一 Prompt 自动 Resume。
+- Agent Definition、Agent Box、Execution Host 分离；Agent Box 本质是绑定 Agent、Host、项目目录的长期工作 Session。
+- 每个 Box 提供三个明确入口：Agent Terminal、Agent Console、Command Terminal。
+- Agent Terminal 是默认入口，使用 xterm.js → WebSocket → gRPC → PTY → tmux attach → 原生 OMP/Codex TUI。
+- Agent Terminal 中用户发送 Prompt 后可以关闭网页；WebSocket 断开不得停止 Agent、当前任务、Tool 或子进程。
+- 每个 Box 使用固定 tmux Session `abox-agent-<box-id>`；重新进入时 attach 同一 Session。
+- Agent Console 使用 OMP RPC/Codex App Server，提供结构化 Message、Tool、Todo、Subagent、Approval 和 Schedule。
+- Command Terminal 是临时项目 Shell，用于 Git、测试、日志和排障，页面离开后可以关闭。
+- 创建 Agent Definition 不启动进程；Box 第一次进入对应入口时按需启动 Runtime/Terminal。
+- 单 Box 同一时间最多一个 Main Run；Prompt、Follow-up、Steer 保持原有语义。
+- Runtime 空闲后可以 Hibernation；下一 Prompt 自动 Resume。
+- 删除 Box 会终止 Runtime、kill 对应 tmux Agent Terminal、从默认列表移除 Session，并保留 Audit/短期恢复数据。
 
 ## 10. 移动端与呈现上下文
 
@@ -175,7 +179,8 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - Todo。
 - Artifact 列表/下载。
 - Workspace Diff。
-- Interactive Terminal。
+- Agent Terminal（tmux 持久原生 OMP/Codex TUI）。
+- Command Terminal（临时项目 Shell）。
 - Idle Hibernation 与 Resume。
 
 ## 12. 安全边界
@@ -187,6 +192,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - Host Command、Message、Event、Schedule Trigger 必须幂等。
 - Runtime Event 先持久化再 SSE 广播。
 - 第一版不管理模型 Secret，但仍需保护 Host Enrollment Credential 与 Control Plane Webhook Secret。
+- Agent Terminal 的 WebSocket Close 只能 detach tmux Client；只有删除 Box 或显式结束 Session 才能 `tmux kill-session`。
 
 ## 13. 验收标准
 
@@ -248,6 +254,19 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] PostgreSQL Migration 可在空库和已升级库执行。
 
 环境验收待办：当前开发机未安装 Tailscale CLI，也没有 Linux/systemd 主机；因此 Tailnet 手机实机链路、macOS LaunchAgent 实际启停和 Linux systemd 实际启停保持未勾选。Release 构建、安装/卸载脚本、权限、LaunchAgent `plutil`、四种 OS/Arch 产物与校验和已通过本地验收。
+### 13.7 Agent Terminal 与 Host Identity
+
+- [x] daemon 首次启动生成本地 `hostId` UUID 并写入 `0600` 配置文件，重启后复用同一 UUID。
+- [x] daemon 注册自定义 `hostName` 与系统 `systemHostname`，Web 可区分多台 Execution Host。
+- [x] Agent Terminal 使用 Box 项目目录启动原生 OMP TUI。
+- [x] 浏览器关闭后 tmux Session 和后台命令继续运行。
+- [x] 新 WebSocket 能重新 attach 同一 tmux Session。
+- [x] daemon 重启后仍能 attach Host 上存活的 tmux Session。
+- [x] Agent Console、Agent Terminal、Command Terminal 在 Web 中有独立入口和名称。
+- [x] Command Terminal 保持临时 PTY 语义。
+- [x] 删除 Box 会从列表隐藏 Session，并终止 Managed Runtime 和 tmux Agent Terminal。
+- [ ] 真实手机/Tailnet 网络切换后重新 attach 同一 tmux Session。
+
 
 ## 14. 范围外
 

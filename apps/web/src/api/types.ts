@@ -113,6 +113,7 @@ export interface Host {
   name: string;
   slug?: string;
   status: HostStatus;
+  systemHostname?: string;
   os?: string;
   arch?: string;
   daemonVersion?: string;

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	hostv1 "agentbox/api"
+	"agentbox/internal/domain"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -88,7 +89,19 @@ var terminalUpgrader = websocket.Upgrader{
 	},
 }
 
-func (s *Server) handleTerminal(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) terminateAgentTerminal(box domain.Box) {
+	s.hosts.sendTerminal(box.HostID, &hostv1.TerminalInput{BoxId: box.ID, Terminate: true})
+}
+
+func (s *Server) handleCommandTerminal(writer http.ResponseWriter, request *http.Request) {
+	s.handleTerminal(writer, request, "command")
+}
+
+func (s *Server) handleAgentTerminal(writer http.ResponseWriter, request *http.Request) {
+	s.handleTerminal(writer, request, "agent")
+}
+
+func (s *Server) handleTerminal(writer http.ResponseWriter, request *http.Request, mode string) {
 	user, ok := requestUser(request)
 	if !ok {
 		writeProblem(writer, http.StatusUnauthorized, "unauthenticated", "authentication is required")
@@ -118,7 +131,7 @@ func (s *Server) handleTerminal(writer http.ResponseWriter, request *http.Reques
 	sessionID := uuid.NewString()
 	subscription := s.terminals.register(sessionID, box.HostID)
 	defer s.terminals.unregister(sessionID, subscription)
-	if !s.hosts.sendTerminal(box.HostID, &hostv1.TerminalInput{SessionId: sessionID, BoxId: box.ID, Workspace: workspace.Path, Open: true, Columns: 120, Rows: 32}) {
+	if !s.hosts.sendTerminal(box.HostID, &hostv1.TerminalInput{SessionId: sessionID, BoxId: box.ID, Workspace: workspace.Path, Mode: mode, RuntimeType: box.RuntimeType, Open: true, Columns: 120, Rows: 32}) {
 		_ = connection.WriteJSON(terminalServerMessage{Type: "error", Error: "host is offline"})
 		return
 	}

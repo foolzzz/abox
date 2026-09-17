@@ -191,6 +191,10 @@ func New(config Config) (*Daemon, error) {
 			_ = connection.Close()
 		}
 	}()
+	systemHostname, err := os.Hostname()
+	if err != nil {
+		return nil, fmt.Errorf("read system hostname: %w", err)
+	}
 
 	workspaceRoots := make([]*hostv1.WorkspaceRoot, 0, len(guard.Roots()))
 	for _, root := range guard.Roots() {
@@ -206,6 +210,8 @@ func New(config Config) (*Daemon, error) {
 		Journal:           journal,
 		AckStore:          ackStore,
 		CredentialStore:   credentialStore,
+		HostName:          config.HostName,
+		SystemHostname:    systemHostname,
 		IdempotencyStore:  idempotency,
 		CommandHandler:    observedCommandHandler{manager: manager, health: health},
 		Reconciliation:    manager,
@@ -227,7 +233,7 @@ func New(config Config) (*Daemon, error) {
 	if err := manager.SetPublisher(client); err != nil {
 		return nil, err
 	}
-	terminal, err := NewTerminalManager(guard, config.MaxTerminalSessions, func(data *hostv1.TerminalData) error {
+	terminal, err := NewTerminalManager(guard, config.TmuxBinary, config.MaxTerminalSessions, func(data *hostv1.TerminalData) error {
 		_, publishErr := client.PublishTerminalData(context.Background(), data)
 		return publishErr
 	})

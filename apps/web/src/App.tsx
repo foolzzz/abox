@@ -28,7 +28,10 @@ export function App() {
   else if (pathname === "/approvals") content = <ApprovalsView />;
   else if (pathname === "/schedules") content = <SchedulesView />;
   else if (pathname === "/notifications") content = <NotificationsView />;
-  else if (/^\/boxes\/[^/]+\/terminal$/.test(pathname)) content = <TerminalView boxId={decodeURIComponent(pathname.slice("/boxes/".length, -"/terminal".length))} />;
+  else if (/^\/boxes\/[^/]+\/(agent-terminal|command-terminal|terminal)$/.test(pathname)) {
+    const [, boxId, terminalKind] = pathname.match(/^\/boxes\/([^/]+)\/(agent-terminal|command-terminal|terminal)$/)!;
+    content = <TerminalView boxId={decodeURIComponent(boxId!)} mode={terminalKind === "agent-terminal" ? "agent" : "command"} />;
+  }
   else if (/^\/boxes\/[^/]+\/(subagents|todos|artifacts|diff)$/.test(pathname)) {
     const [, boxId, panel] = pathname.match(/^\/boxes\/([^/]+)\/(subagents|todos|artifacts|diff)$/)!;
     content = <BoxAutomationView boxId={decodeURIComponent(boxId!)} panel={panel as BoxAutomationPanel} />;

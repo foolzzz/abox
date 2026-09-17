@@ -45,6 +45,8 @@ message HostHello {
   uint64 last_acked_host_seq = 8;
   repeated RuntimeCapability runtimes = 9;
   repeated WorkspaceRoot workspace_roots = 10;
+  string system_hostname = 11;
+  string display_name = 12;
 }
 
 message RuntimeCapability {
@@ -149,6 +151,9 @@ message TerminalInput {
   uint32 rows = 6;
   bool open = 7;
   bool close = 8;
+  string mode = 9;
+  string runtime_type = 10;
+  bool terminate = 12;
 }
 
 message Welcome {

@@ -1,6 +1,7 @@
 # Agent Box 技术设计方案
 
 - 状态：Draft
+- Agent Terminal 设计：[`agent-terminal-technical-design.md`](./agent-terminal-technical-design.md)
 - 目标版本：MVP → Multi-user V1
 - 核心组件：`agentbox-web`、`agentbox-server`、`agentboxd`
 - 网络前提：所有客户端、Control Plane 与 Execution Host 位于同一 Tailscale Tailnet

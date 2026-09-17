@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type Config struct {
@@ -18,11 +20,13 @@ type Config struct {
 	ServerTLS              bool
 	ServerName             string
 	HostID                 string
+	HostName               string
 	EnrollmentToken        string
 	StateDirectory         string
 	WorkspaceRoots         []string
 	OMPBinary              string
 	CodexBinary            string
+	TmuxBinary             string
 	EnableCodex            bool
 	ClaudeBinary           string
 	EnableClaude           bool
@@ -48,12 +52,14 @@ type daemonFileConfig struct {
 	ServerTLS              bool     `json:"serverTLS"`
 	ServerName             string   `json:"serverName"`
 	HostID                 string   `json:"hostId"`
+	HostName               string   `json:"hostName"`
 	EnrollmentToken        string   `json:"enrollmentToken"`
 	StateDirectory         string   `json:"stateDirectory"`
 	WorkspaceRoots         []string `json:"workspaceRoots"`
 	OMPBinary              string   `json:"ompBinary"`
 	CodexBinary            string   `json:"codexBinary"`
 	EnableCodex            *bool    `json:"enableCodex"`
+	TmuxBinary             string   `json:"tmuxBinary"`
 	ClaudeBinary           string   `json:"claudeBinary"`
 	EnableClaude           bool     `json:"enableClaude"`
 	ClaudePermissionMode   string   `json:"claudePermissionMode"`
@@ -136,6 +142,10 @@ func LoadConfig(path string) (Config, error) {
 		}
 		return Config{}, fmt.Errorf("decode agentboxd config %s: %w", path, err)
 	}
+	raw.HostID, err = ensureConfiguredHostID(path, raw.HostID)
+	if err != nil {
+		return Config{}, err
+	}
 	stateDirectory := raw.StateDirectory
 	if strings.TrimSpace(stateDirectory) == "" {
 		stateDirectory = filepath.Join(daemonHome, "state")
@@ -188,11 +198,15 @@ func LoadConfig(path string) (Config, error) {
 	if codexBinary == "" {
 		codexBinary = "codex"
 	}
+	tmuxBinary := strings.TrimSpace(raw.TmuxBinary)
+	if tmuxBinary == "" {
+		tmuxBinary = "tmux"
+	}
 	result := Config{
 		HomeDirectory: daemonHome, ServerAddress: raw.ServerAddress, ServerTLS: raw.ServerTLS,
-		ServerName: raw.ServerName, HostID: raw.HostID, EnrollmentToken: raw.EnrollmentToken,
+		ServerName: raw.ServerName, HostID: raw.HostID, HostName: strings.TrimSpace(raw.HostName), EnrollmentToken: raw.EnrollmentToken,
 		StateDirectory: stateDirectory, WorkspaceRoots: roots, OMPBinary: raw.OMPBinary,
-		CodexBinary: codexBinary, EnableCodex: enableCodex,
+		CodexBinary: codexBinary, EnableCodex: enableCodex, TmuxBinary: tmuxBinary,
 		ClaudeBinary: raw.ClaudeBinary, EnableClaude: raw.EnableClaude,
 		ClaudePermissionMode: raw.ClaudePermissionMode, HealthAddress: raw.HealthAddress,
 		MaxActiveBoxes: raw.MaxActiveBoxes, MaxTerminalSessions: raw.MaxTerminalSessions,
@@ -206,6 +220,34 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("validate agentboxd config %s: %w", path, err)
 	}
 	return result, nil
+}
+
+func ensureConfiguredHostID(configPath, configured string) (string, error) {
+	configured = strings.TrimSpace(configured)
+	if configured != "" {
+		if _, err := uuid.Parse(configured); err != nil {
+			return "", fmt.Errorf("hostId must be a UUID: %w", err)
+		}
+		return configured, nil
+	}
+	hostID := uuid.NewString()
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("read agentboxd config for hostId: %w", err)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(content, &object); err != nil {
+		return "", fmt.Errorf("decode agentboxd config for hostId: %w", err)
+	}
+	object["hostId"] = hostID
+	encoded, err := json.MarshalIndent(object, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode agentboxd config with hostId: %w", err)
+	}
+	if err := writeAtomic(configPath, append(encoded, '\n'), 0o600); err != nil {
+		return "", fmt.Errorf("persist generated hostId: %w", err)
+	}
+	return hostID, nil
 }
 
 func (c Config) Validate() error {
@@ -228,6 +270,9 @@ func (c Config) Validate() error {
 	}
 	if c.EnableCodex && strings.TrimSpace(c.CodexBinary) == "" {
 		return errors.New("codexBinary is required when enableCodex is true")
+	}
+	if strings.TrimSpace(c.TmuxBinary) == "" {
+		return errors.New("tmuxBinary is required")
 	}
 	if c.EnableClaude && strings.TrimSpace(c.ClaudeBinary) == "" {
 		return errors.New("claudeBinary is required when enableClaude is true")
