@@ -14,8 +14,6 @@ import (
 	"github.com/creack/pty"
 )
 
-const defaultMaxTerminalSessions = 8
-
 type terminalSession struct {
 	id      string
 	command *exec.Cmd
@@ -33,13 +31,16 @@ type TerminalManager struct {
 	sessions map[string]*terminalSession
 }
 
-func NewTerminalManager(guard *WorkspaceGuard, emit func(*hostv1.TerminalData) error) (*TerminalManager, error) {
+func NewTerminalManager(guard *WorkspaceGuard, maxSessions int, emit func(*hostv1.TerminalData) error) (*TerminalManager, error) {
 	if guard == nil || emit == nil {
 		return nil, errors.New("workspace guard and terminal emitter are required")
 	}
+	if maxSessions <= 0 {
+		return nil, errors.New("terminal session limit must be positive")
+	}
 	return &TerminalManager{
 		guard:       guard,
-		maxSessions: defaultMaxTerminalSessions,
+		maxSessions: maxSessions,
 		emit:        emit,
 		sessions:    make(map[string]*terminalSession),
 	}, nil

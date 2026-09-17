@@ -56,7 +56,7 @@ func run(logger *slog.Logger, configPath string) error {
 	if err != nil {
 		return err
 	}
-	developmentIdentity, err := identity.NewDevelopmentExtractor(true, identity.Principal{
+	developmentIdentity, err := identity.NewDevelopmentExtractor(configuration.EnableDevelopmentAuth, identity.Principal{
 		LoginName:   configuration.DevelopmentUser,
 		DisplayName: configuration.DevelopmentUser,
 	}, identity.LoopbackTrust{})
@@ -80,6 +80,9 @@ func run(logger *slog.Logger, configPath string) error {
 		HibernationPollInterval: configuration.HibernationPollInterval,
 		SchedulePollInterval:    configuration.SchedulePollInterval,
 		ReaperBatchSize:         configuration.ReaperBatchSize,
+		RetentionPollInterval:   configuration.RetentionPollInterval,
+		OperationalRetention:    configuration.OperationalRetention,
+		AuditRetention:          configuration.AuditRetention,
 		WebhookSecret:           configuration.WebhookSecret,
 		EnableClaude:            configuration.EnableClaude,
 	})
@@ -125,14 +128,18 @@ func run(logger *slog.Logger, configPath string) error {
 
 	logger.Info("agentbox-server started",
 		"component", "agentbox-server",
+		"version", configuration.Version,
 		"http_addr", configuration.HTTPAddr,
 		"grpc_addr", configuration.GRPCAddr,
+		"claude_enabled", configuration.EnableClaude,
 	)
 
 	var serveErr error
 	select {
 	case <-rootContext.Done():
+		logger.Info("agentbox-server stopping", "component", "agentbox-server", "reason", "signal")
 	case serveErr = <-serveErrors:
+		logger.Error("agentbox-server listener stopped", "component", "agentbox-server", "error", serveErr)
 		cancel()
 	}
 
@@ -154,6 +161,9 @@ func run(logger *slog.Logger, configPath string) error {
 	case <-shutdownContext.Done():
 		grpcServer.Stop()
 		<-grpcStopped
+	}
+	if serveErr == nil {
+		logger.Info("agentbox-server stopped", "component", "agentbox-server")
 	}
 	return serveErr
 }

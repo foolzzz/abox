@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"agentbox/internal/domain"
 )
@@ -71,6 +72,7 @@ type Store interface {
 	ListNotifications(ctx context.Context, user domain.User, limit int) ([]domain.Notification, error)
 	MarkNotificationRead(ctx context.Context, user domain.User, notificationID string) error
 	MarkAllNotificationsRead(ctx context.Context, user domain.User) error
+	PruneOperationalData(ctx context.Context, operationalBefore, auditBefore time.Time, limit int) (int64, error)
 
 	ListSubagents(ctx context.Context, user domain.User, boxID string) ([]domain.SubagentInstance, error)
 	ListTodos(ctx context.Context, user domain.User, boxID string) ([]domain.TodoItem, error)

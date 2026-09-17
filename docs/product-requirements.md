@@ -182,58 +182,60 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 
 ### 13.1 组件与部署
 
-- [ ] Web、Server、daemon 独立构建。
-- [ ] Server 可嵌入 Web 静态资源单点部署。
-- [ ] Server 配置完全来自配置文件。
-- [ ] daemon 默认读取 `~/.agentboxd/config.json`。
+- [x] Web、Server、daemon 独立构建。
+- [x] Server 可嵌入 Web 静态资源单点部署。
+- [x] Server 配置完全来自配置文件。
+- [x] daemon 默认读取 `~/.agentboxd/config.json`。
 - [ ] macOS LaunchAgent 可安装、启动、停止、卸载。
 - [ ] Linux systemd Service 可安装、启动、停止、卸载。
 
 ### 13.2 OMP Runtime
 
-- [ ] 默认只显示和启动 OMP。
-- [ ] 未显式开启 Feature Flag 时不能创建 Claude Box。
-- [ ] OMP 使用 Host 当前系统认证完成真实调用。
-- [ ] 连续两轮对话保持 Session。
-- [ ] Prompt、Steer、Follow-up、Interrupt、Stop、Resume 实测通过。
-- [ ] Subagent、Todo、Tool Event 可展示。
-- [ ] Remote Approval 可批准、拒绝和超时默认拒绝。
+- [x] 默认只显示和启动 OMP。
+- [x] 未显式开启 Feature Flag 时不能创建 Claude Box。
+- [x] OMP 使用 Host 当前系统认证完成真实调用。
+- [x] 连续两轮对话保持 Session。
+- [x] Prompt、Steer、Follow-up、Interrupt、Stop、Resume 实测通过。
+- [x] Subagent、Todo、Tool Event 可展示。
+- [x] Remote Approval 可批准、拒绝和超时默认拒绝。
 
 ### 13.3 Remote 与多用户
 
 - [ ] 手机通过 Tailnet 打开 Web Console 并操作远端 Host Agent。
-- [ ] 页面断开后 Agent 继续执行。
-- [ ] 重连后通过 Event Seq 完整回放。
-- [ ] 两个用户同时查看同一 Box。
-- [ ] Viewer 未授权操作返回 403。
-- [ ] Operator 可操作显式分享的 Box。
-- [ ] 多用户消息显示正确作者。
+- [x] 页面断开后 Agent 继续执行。
+- [x] 重连后通过 Event Seq 完整回放。
+- [x] 两个用户同时查看同一 Box。
+- [x] Viewer 未授权操作返回 403。
+- [x] Operator 可操作显式分享的 Box。
+- [x] 多用户消息显示正确作者。
 
 ### 13.4 Presentation Context
 
-- [ ] 手机 Prompt 持久化 mobile Presentation Context。
-- [ ] daemon 注入隐藏 Presentation Context 到 OMP Turn。
-- [ ] Agent 在 mobile Context 下不输出宽表格并优先短段落。
-- [ ] 桌面 Prompt 使用 desktop Context。
-- [ ] 两个设备的 Context 不互相覆盖。
-- [ ] Resize 不产生新 Agent Turn、不打断当前 Run。
+- [x] 手机 Prompt 持久化 mobile Presentation Context。
+- [x] daemon 注入隐藏 Presentation Context 到 OMP Turn。
+- [x] Agent 在 mobile Context 下不输出宽表格并优先短段落。
+- [x] 桌面 Prompt 使用 desktop Context。
+- [x] 两个设备的 Context 不互相覆盖。
+- [x] Resize 不产生新 Agent Turn、不打断当前 Run。
 
 ### 13.5 Automation
 
-- [ ] Schedule 能无人值守创建并完成 OMP Run。
-- [ ] Webhook 签名错误被拒绝，重复 Idempotency Key 不重复执行。
-- [ ] Approval Reaper 和 Hibernation Reaper 在 Server 重启后继续工作。
-- [ ] Artifact、Diff、Subagent、Todo、Notification API 与 UI 可用。
-- [ ] Terminal 在授权 Workspace 中运行，不能逃逸 Workspace Root。
+- [x] Schedule 能无人值守创建并完成 OMP Run。
+- [x] Webhook 签名错误被拒绝，重复 Idempotency Key 不重复执行。
+- [x] Approval Reaper 和 Hibernation Reaper 在 Server 重启后继续工作。
+- [x] Artifact、Diff、Subagent、Todo、Notification API 与 UI 可用。
+- [x] Terminal 在授权 Workspace 中运行，不能逃逸 Workspace Root。
 
 ### 13.6 可靠性与安全
 
-- [ ] Server 重启后 daemon 自动重连并恢复 Snapshot。
-- [ ] daemon 断网期间 Event 写入 Journal，重连后去重上传。
-- [ ] 重复 Command 不重复执行副作用。
-- [ ] 所有关键操作产生 Audit Log。
-- [ ] 配置、日志、Event 不包含 Runtime API Key。
-- [ ] PostgreSQL Migration 可在空库和已升级库执行。
+- [x] Server 重启后 daemon 自动重连并恢复 Snapshot。
+- [x] daemon 断网期间 Event 写入 Journal，重连后去重上传。
+- [x] 重复 Command 不重复执行副作用。
+- [x] 所有关键操作产生 Audit Log。
+- [x] 配置、日志、Event 不包含 Runtime API Key。
+- [x] PostgreSQL Migration 可在空库和已升级库执行。
+
+环境验收待办：当前开发机未安装 Tailscale CLI，也没有 Linux/systemd 主机；因此 Tailnet 手机实机链路、macOS LaunchAgent 实际启停和 Linux systemd 实际启停保持未勾选。Release 构建、安装/卸载脚本、权限、LaunchAgent `plutil`、四种 OS/Arch 产物与校验和已通过本地验收。
 
 ## 14. 范围外
 

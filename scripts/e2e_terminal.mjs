@@ -13,7 +13,7 @@ const timeout = setTimeout(() => {
 }, 30_000);
 
 socket.on("open", () => {
-  setTimeout(() => socket.send(JSON.stringify({ type: "input", data: "printf '\\x54\\x45\\x52\\x4d\\x49\\x4e\\x41\\x4c\\x5f\\x4f\\x4b\\n'\n" })), 1_000);
+  setTimeout(() => socket.send(JSON.stringify({ type: "input", data: "\nprintf '\\x54\\x45\\x52\\x4d\\x49\\x4e\\x41\\x4c\\x5f\\x4f\\x4b\\n'\n" })), 2_000);
 });
 socket.on("message", (raw) => {
   const message = JSON.parse(raw.toString());

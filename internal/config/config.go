@@ -17,12 +17,16 @@ type Config struct {
 	GRPCAddr                string
 	PublicURL               string
 	DevelopmentUser         string
+	EnableDevelopmentAuth   bool
 	EnrollmentToken         string
 	WebDir                  string
 	Version                 string
 	ApprovalPollInterval    time.Duration
 	HibernationPollInterval time.Duration
 	SchedulePollInterval    time.Duration
+	RetentionPollInterval   time.Duration
+	OperationalRetention    time.Duration
+	AuditRetention          time.Duration
 	ReaperBatchSize         int
 	WebhookSecret           string
 	EnableClaude            bool
@@ -34,12 +38,16 @@ type fileConfig struct {
 	GRPCAddr                string `json:"grpcAddr"`
 	PublicURL               string `json:"publicUrl"`
 	DevelopmentUser         string `json:"developmentUser"`
+	EnableDevelopmentAuth   bool   `json:"enableDevelopmentAuth"`
 	EnrollmentToken         string `json:"enrollmentToken"`
 	WebDir                  string `json:"webDir"`
 	Version                 string `json:"version"`
 	ApprovalPollInterval    string `json:"approvalPollInterval"`
 	HibernationPollInterval string `json:"hibernationPollInterval"`
 	SchedulePollInterval    string `json:"schedulePollInterval"`
+	RetentionPollInterval   string `json:"retentionPollInterval"`
+	OperationalRetention    string `json:"operationalRetention"`
+	AuditRetention          string `json:"auditRetention"`
 	ReaperBatchSize         int    `json:"reaperBatchSize"`
 	WebhookSecret           string `json:"webhookSecret"`
 	EnableClaude            bool   `json:"enableClaude"`
@@ -110,6 +118,18 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	retentionPoll, err := parseDuration("retentionPollInterval", raw.RetentionPollInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	operationalRetention, err := parseDuration("operationalRetention", raw.OperationalRetention)
+	if err != nil {
+		return Config{}, err
+	}
+	auditRetention, err := parseDuration("auditRetention", raw.AuditRetention)
+	if err != nil {
+		return Config{}, err
+	}
 	webDir, err := expandOptionalPath(raw.WebDir)
 	if err != nil {
 		return Config{}, err
@@ -117,10 +137,13 @@ func Load(path string) (Config, error) {
 	result := Config{
 		DatabaseURL: raw.DatabaseURL, HTTPAddr: raw.HTTPAddr, GRPCAddr: raw.GRPCAddr,
 		PublicURL: raw.PublicURL, DevelopmentUser: raw.DevelopmentUser,
-		EnrollmentToken: raw.EnrollmentToken, WebDir: webDir, Version: raw.Version,
+		EnableDevelopmentAuth: raw.EnableDevelopmentAuth,
+		EnrollmentToken:       raw.EnrollmentToken, WebDir: webDir, Version: raw.Version,
 		ApprovalPollInterval: approval, HibernationPollInterval: hibernation,
-		SchedulePollInterval: schedule, ReaperBatchSize: raw.ReaperBatchSize,
-		WebhookSecret: raw.WebhookSecret, EnableClaude: raw.EnableClaude,
+		SchedulePollInterval: schedule, RetentionPollInterval: retentionPoll,
+		OperationalRetention: operationalRetention, AuditRetention: auditRetention,
+		ReaperBatchSize: raw.ReaperBatchSize, WebhookSecret: raw.WebhookSecret,
+		EnableClaude: raw.EnableClaude,
 	}
 	if err := result.Validate(); err != nil {
 		return Config{}, fmt.Errorf("validate server config %s: %w", path, err)
@@ -138,8 +161,17 @@ func (c Config) Validate() error {
 			return fmt.Errorf("%s is required", name)
 		}
 	}
-	if c.ApprovalPollInterval <= 0 || c.HibernationPollInterval <= 0 || c.SchedulePollInterval <= 0 {
+	if c.EnrollmentToken == "replace-me" || c.WebhookSecret == "replace-me" {
+		return errors.New("replace placeholder enrollmentToken and webhookSecret before starting the server")
+	}
+	if strings.TrimSpace(c.WebhookSecret) == "" {
+		return errors.New("webhookSecret is required")
+	}
+	if c.ApprovalPollInterval <= 0 || c.HibernationPollInterval <= 0 || c.SchedulePollInterval <= 0 || c.RetentionPollInterval <= 0 {
 		return errors.New("poll intervals must be positive")
+	}
+	if c.OperationalRetention < time.Hour || c.AuditRetention < time.Hour {
+		return errors.New("retention windows must be at least one hour")
 	}
 	if c.ReaperBatchSize <= 0 || c.ReaperBatchSize > 10_000 {
 		return errors.New("reaperBatchSize must be between 1 and 10000")

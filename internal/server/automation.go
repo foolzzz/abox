@@ -155,6 +155,9 @@ func (s *Server) handleScheduleWebhook(writer http.ResponseWriter, request *http
 	queued, dispatchErr := s.store.DispatchAutomationRuns(request.Context(), s.reaperBatchSize)
 	if dispatchErr != nil {
 		s.logError("dispatch webhook run", dispatchErr, "schedule_id", scheduleID)
+		s.metrics.recordFailure("automation scheduler", "automation scheduler failed")
+	} else {
+		s.observeScheduleDispatches(queued)
 	}
 	for index := range queued {
 		s.dispatch(&queued[index])

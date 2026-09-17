@@ -134,6 +134,21 @@ func (m *Manager) ActiveBoxes() int {
 	return len(m.boxes)
 }
 
+func (m *Manager) OperationalCounts() (activeBoxes, activeRuns int, shuttingDown bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	activeBoxes = len(m.boxes)
+	shuttingDown = m.shuttingDown
+	for _, slot := range m.boxes {
+		slot.mu.Lock()
+		if slot.runCancel != nil {
+			activeRuns++
+		}
+		slot.mu.Unlock()
+	}
+	return activeBoxes, activeRuns, shuttingDown
+}
+
 func (m *Manager) HandleCommand(ctx context.Context, command *hostv1.HostCommand) (hostclient.CommandResult, error) {
 	m.commandGate.RLock()
 	defer m.commandGate.RUnlock()

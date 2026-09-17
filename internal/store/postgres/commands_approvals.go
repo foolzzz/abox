@@ -677,6 +677,22 @@ func (s *Store) HibernateIdleBoxes(ctx context.Context, limit int) ([]domain.Hos
 	limit = boundedLimit(limit, 100, 500)
 	commands := make([]domain.HostCommand, 0)
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+            WITH stale AS (
+                SELECT b.id
+                FROM boxes b
+                JOIN hosts h ON h.id = b.host_id
+                WHERE h.status = 'offline'
+                  AND b.status IN ('starting','running','waiting_approval','hibernating')
+                ORDER BY b.updated_at, b.id
+                LIMIT $1
+                FOR UPDATE OF b SKIP LOCKED
+            )
+            UPDATE boxes b
+            SET status = 'error', updated_at = now(), version = b.version + 1
+            WHERE b.id IN (SELECT id FROM stale)`, limit); err != nil {
+			return mapError("recover offline host boxes", err)
+		}
 		rows, err := tx.Query(ctx, `
             SELECT b.id
             FROM boxes b

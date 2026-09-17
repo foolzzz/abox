@@ -372,6 +372,22 @@ func (j *Journal) LastSequence() uint64 {
 	return j.nextSeq - 1
 }
 
+type JournalStats struct {
+	Records int
+	Bytes   int64
+	Closed  bool
+}
+
+func (j *Journal) Stats() JournalStats {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return JournalStats{
+		Records: len(j.records),
+		Bytes:   j.bytesOnDisk,
+		Closed:  j.closed,
+	}
+}
+
 func (j *Journal) Close() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()

@@ -50,7 +50,10 @@ type StateStore struct {
 	state runtimeStateFile
 }
 
-func OpenStateStore(path string) (*StateStore, error) {
+func OpenStateStore(path string, retention time.Duration) (*StateStore, error) {
+	if retention <= 0 {
+		return nil, errors.New("runtime state retention must be positive")
+	}
 	store := &StateStore{
 		path: path,
 		state: runtimeStateFile{
@@ -78,6 +81,12 @@ func OpenStateStore(path string) (*StateStore, error) {
 			record.ProcessID = 0
 			record.UpdatedAt = now
 			store.state.Boxes[boxID] = record
+			changed = true
+			continue
+		}
+		if !record.UpdatedAt.IsZero() && now.Sub(record.UpdatedAt) > retention {
+			delete(store.state.Boxes, boxID)
+			_ = os.Remove(filepath.Join(filepath.Dir(path), "prompts", boxID+".md"))
 			changed = true
 		}
 	}

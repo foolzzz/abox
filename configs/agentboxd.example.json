@@ -6,7 +6,7 @@
   "enrollmentToken": "replace-me",
   "stateDirectory": "~/.agentboxd/state",
   "workspaceRoots": [
-    "/Users/example/projects"
+    "~"
   ],
   "ompBinary": "omp",
   "claudeBinary": "claude",
@@ -14,8 +14,15 @@
   "claudePermissionMode": "dontAsk",
   "healthAddress": "127.0.0.1:9091",
   "maxActiveBoxes": 4,
+  "maxTerminalSessions": 8,
+  "journalMaxBytes": 67108864,
+  "journalMaxRecords": 16384,
+  "journalMaxRecordBytes": 1048576,
+  "idempotencyMaxFrames": 16384,
+  "idempotencyMaxCommands": 8192,
   "maxRunDuration": "2h",
   "heartbeatInterval": "15s",
   "shutdownTimeout": "15s",
-  "runtimeProbeTimeout": "10s"
+  "runtimeProbeTimeout": "10s",
+  "runtimeStateRetention": "168h"
 }

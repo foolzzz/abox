@@ -54,15 +54,22 @@ func New(config Config) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
-	state, err := OpenStateStore(filepath.Join(stateDirectory, "runtimes.json"))
+	state, err := OpenStateStore(filepath.Join(stateDirectory, "runtimes.json"), config.RuntimeStateRetention)
 	if err != nil {
 		return nil, err
 	}
-	idempotency, err := OpenDurableIdempotencyStore(filepath.Join(stateDirectory, "idempotency.json"), hostclient.DefaultIdempotencyLimits())
+	idempotency, err := OpenDurableIdempotencyStore(filepath.Join(stateDirectory, "idempotency.json"), hostclient.IdempotencyLimits{
+		MaxFrameIDs: config.IdempotencyMaxFrames,
+		MaxCommands: config.IdempotencyMaxCommands,
+	})
 	if err != nil {
 		return nil, err
 	}
-	journal, err := hostclient.OpenJournal(filepath.Join(stateDirectory, "outbound.jsonl"), hostclient.DefaultJournalLimits(), nil)
+	journal, err := hostclient.OpenJournal(filepath.Join(stateDirectory, "outbound.jsonl"), hostclient.JournalLimits{
+		MaxBytes:       config.JournalMaxBytes,
+		MaxRecords:     config.JournalMaxRecords,
+		MaxRecordBytes: config.JournalMaxRecordBytes,
+	}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +113,7 @@ func New(config Config) (*Daemon, error) {
 	registrations := make([]AdapterRegistration, 0, len(runtimeCandidates))
 	advertisedRuntimes := make([]*hostv1.RuntimeCapability, 0, len(runtimeCandidates))
 	runtimeVersions := make([]string, 0, len(runtimeCandidates))
+	runtimeDiagnostics := make([]runtimeDiagnostic, 0, len(runtimeCandidates))
 	var probeErrors error
 	for _, candidate := range runtimeCandidates {
 		probeCtx, cancelProbe := context.WithTimeout(context.Background(), config.RuntimeProbeTime)
@@ -113,6 +121,10 @@ func New(config Config) (*Daemon, error) {
 		cancelProbe()
 		if probeErr != nil {
 			probeErrors = errors.Join(probeErrors, fmt.Errorf("probe %s runtime: %w", candidate.adapter.Name(), probeErr))
+			runtimeDiagnostics = append(runtimeDiagnostics, runtimeDiagnostic{
+				Name:    string(candidate.adapter.Name()),
+				Summary: "runtime probe failed",
+			})
 			continue
 		}
 		capabilitiesJSON, err := json.Marshal(capabilities)
@@ -139,14 +151,20 @@ func New(config Config) (*Daemon, error) {
 			CapabilitiesJson: capabilitiesJSON,
 		})
 		runtimeVersions = append(runtimeVersions, fmt.Sprintf("%s=%s", candidate.adapter.Name(), version))
+		runtimeDiagnostics = append(runtimeDiagnostics, runtimeDiagnostic{
+			Name:      string(candidate.adapter.Name()),
+			Version:   version,
+			Available: true,
+		})
 	}
 	manager, err := NewManager(registrations, guard, state, config.MaxActiveBoxes, config.MaxRunDuration)
 	if err != nil {
 		return nil, err
 	}
 	health := NewHealthStatus(manager, len(registrations) > 0, strings.Join(runtimeVersions, ","))
+	health.configureDiagnostics(config.DaemonVersion, journal, runtimeDiagnostics)
 	if probeErrors != nil {
-		health.SetError(probeErrors)
+		health.RecordFailure("runtime_probe", "one or more enabled runtimes failed startup probing")
 	}
 	target, transportCredentials, err := transport(config)
 	if err != nil {
@@ -178,7 +196,7 @@ func New(config Config) (*Daemon, error) {
 		AckStore:          ackStore,
 		CredentialStore:   credentialStore,
 		IdempotencyStore:  idempotency,
-		CommandHandler:    manager,
+		CommandHandler:    observedCommandHandler{manager: manager, health: health},
 		Reconciliation:    manager,
 		ServerHooks:       manager,
 		HeartbeatProvider: manager,
@@ -198,7 +216,7 @@ func New(config Config) (*Daemon, error) {
 	if err := manager.SetPublisher(client); err != nil {
 		return nil, err
 	}
-	terminal, err := NewTerminalManager(guard, func(data *hostv1.TerminalData) error {
+	terminal, err := NewTerminalManager(guard, config.MaxTerminalSessions, func(data *hostv1.TerminalData) error {
 		_, publishErr := client.PublishTerminalData(context.Background(), data)
 		return publishErr
 	})

@@ -37,6 +37,9 @@ type Options struct {
 	HibernationPollInterval time.Duration
 	ReaperBatchSize         int
 	SchedulePollInterval    time.Duration
+	RetentionPollInterval   time.Duration
+	OperationalRetention    time.Duration
+	AuditRetention          time.Duration
 	WebhookSecret           string
 	EnableClaude            bool
 	HeartbeatInterval       time.Duration
@@ -60,6 +63,9 @@ type Server struct {
 	hibernationPollInterval time.Duration
 	reaperBatchSize         int
 	schedulePollInterval    time.Duration
+	retentionPollInterval   time.Duration
+	operationalRetention    time.Duration
+	auditRetention          time.Duration
 	webhookSecret           string
 	enableClaude            bool
 	heartbeatInterval       time.Duration
@@ -104,6 +110,15 @@ func New(options Options) (*Server, error) {
 	if options.SchedulePollInterval <= 0 {
 		options.SchedulePollInterval = time.Second
 	}
+	if options.RetentionPollInterval <= 0 {
+		options.RetentionPollInterval = time.Hour
+	}
+	if options.OperationalRetention <= 0 {
+		options.OperationalRetention = 30 * 24 * time.Hour
+	}
+	if options.AuditRetention <= 0 {
+		options.AuditRetention = 365 * 24 * time.Hour
+	}
 	if options.HeartbeatInterval <= 0 {
 		options.HeartbeatInterval = 15 * time.Second
 	}
@@ -118,6 +133,7 @@ func New(options Options) (*Server, error) {
 	}
 
 	metricSet := newMetrics()
+	metricSet.claudeEnabled = options.EnableClaude
 	server := &Server{
 		store:                   options.Store,
 		identity:                options.Identity,
@@ -130,6 +146,9 @@ func New(options Options) (*Server, error) {
 		hibernationPollInterval: options.HibernationPollInterval,
 		reaperBatchSize:         options.ReaperBatchSize,
 		schedulePollInterval:    options.SchedulePollInterval,
+		retentionPollInterval:   options.RetentionPollInterval,
+		operationalRetention:    options.OperationalRetention,
+		auditRetention:          options.AuditRetention,
 		enableClaude:            options.EnableClaude,
 		webhookSecret:           strings.TrimSpace(options.WebhookSecret),
 		heartbeatInterval:       options.HeartbeatInterval,
@@ -156,6 +175,7 @@ func (s *Server) Run(ctx context.Context) {
 	go s.runApprovalReaper(ctx)
 	go s.runHibernationReaper(ctx)
 	go s.runAutomationScheduler(ctx)
+	go s.runRetentionReaper(ctx)
 	<-ctx.Done()
 }
 
@@ -167,7 +187,8 @@ func (s *Server) routes() http.Handler {
 
 	router.Get("/healthz", s.handleHealth)
 	router.Get("/readyz", s.handleReady)
-	router.Get("/metrics", s.metrics.handle)
+	router.Get("/metrics", s.handleMetrics)
+	router.With(s.authenticate, s.requireRole(roleViewer)).Get("/diagnostics", s.handleDiagnostics)
 	router.Post("/api/v1/webhooks/schedules/{scheduleID}", s.handleScheduleWebhook)
 
 	router.Route("/api/v1", func(api chi.Router) {
@@ -260,6 +281,7 @@ func (s *Server) handleReady(writer http.ResponseWriter, request *http.Request) 
 	ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
 	defer cancel()
 	if _, err := s.store.ListAgents(ctx, s.developmentUser); err != nil {
+		s.metrics.recordFailure("database", "database readiness check failed")
 		writeProblem(writer, http.StatusServiceUnavailable, "not_ready", "database is unavailable")
 		return
 	}
@@ -309,6 +331,7 @@ func (s *Server) writeStoreError(writer http.ResponseWriter, operation string, e
 	statusCode, code := statusForStoreError(err)
 	if statusCode == http.StatusInternalServerError {
 		s.logError(operation, err)
+		s.metrics.recordFailure("database", "database request failed")
 	}
 	message := http.StatusText(statusCode)
 	writeProblem(writer, statusCode, code, message)

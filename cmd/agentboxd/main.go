@@ -15,7 +15,8 @@ import (
 var version = "dev"
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("component", "agentboxd")
+	slog.SetDefault(logger)
 	configPath := flag.String("config", "", "path to agentboxd JSON configuration")
 	flag.Parse()
 	if err := run(*configPath); err != nil {
@@ -37,11 +38,18 @@ func run(configPath string) error {
 	if err != nil {
 		return err
 	}
+	slog.Info("agentboxd starting",
+		"version", version,
+		"health_addr", config.HealthAddress,
+		"max_active_boxes", config.MaxActiveBoxes,
+		"claude_enabled", config.EnableClaude,
+	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := service.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
+	slog.Info("agentboxd stopped")
 	return nil
 }

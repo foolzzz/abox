@@ -11,6 +11,7 @@ func (s *Server) runApprovalReaper(ctx context.Context) {
 		if err != nil {
 			return err
 		}
+		s.metrics.approvalTimeouts.Add(uint64(len(commands)))
 		for index := range commands {
 			s.dispatch(&commands[index])
 		}
@@ -44,10 +45,24 @@ func (s *Server) runAutomationScheduler(ctx context.Context) {
 		if err != nil {
 			return err
 		}
+		s.observeScheduleDispatches(commands)
 		for index := range commands {
 			s.dispatch(&commands[index])
 		}
 		return nil
+	})
+}
+
+func (s *Server) runRetentionReaper(ctx context.Context) {
+	s.runReaper(ctx, "retention reaper", s.retentionPollInterval, func(runContext context.Context) error {
+		now := time.Now().UTC()
+		_, err := s.store.PruneOperationalData(
+			runContext,
+			now.Add(-s.operationalRetention),
+			now.Add(-s.auditRetention),
+			s.reaperBatchSize,
+		)
+		return err
 	})
 }
 
@@ -62,6 +77,7 @@ func (s *Server) runReaper(ctx context.Context, name string, interval time.Durat
 		if err != nil {
 			s.metrics.reaperErrors.Add(1)
 			s.logError(name, err)
+			s.metrics.recordFailure(name, name+" failed")
 			delay = backoff
 			backoff *= 2
 			if backoff > 30*time.Second {

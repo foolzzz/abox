@@ -68,6 +68,12 @@ func (h *hostHub) unregister(connection *hostConnection) bool {
 	return true
 }
 
+func (h *hostHub) connected(hostID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.connections[hostID] != nil
+}
+
 func (h *hostHub) dispatch(hostID string, command *domain.HostCommand) bool {
 	h.mu.RLock()
 	connection := h.connections[hostID]
@@ -428,6 +434,7 @@ func (s *Server) processCommandAck(ctx context.Context, ack *hostv1.CommandAck) 
 	if err := s.store.UpdateHostCommand(ctx, ack.GetCommandId(), commandStatus, ack.GetErrorCode(), ack.GetErrorMessage(), ack.GetResultJson()); err != nil {
 		return storeGRPCStatus("persist command ack", err)
 	}
+	s.metrics.observeCommandOutcome(commandStatus)
 	return nil
 }
 

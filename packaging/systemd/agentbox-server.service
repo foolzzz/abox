@@ -1,0 +1,15 @@
+[Unit]
+Description=Agent Box control-plane server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+ExecStart=%h/.local/bin/agentbox-server --config %h/.agentbox/server.json
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: generate fmt test build web-build postgres-up postgres-down dev-server dev-daemon
+.PHONY: generate fmt test build web-build release postgres-up postgres-down dev-server dev-daemon
 
 generate:
 	protoc --go_out=. --go_opt=paths=source_relative \
@@ -21,6 +21,10 @@ build: web-build
 
 web-build:
 	npm --workspace apps/web run build
+
+release:
+	@test -n "$(VERSION)" || { echo "error: VERSION is required (make release VERSION=0.1.0)" >&2; exit 2; }
+	./scripts/build-release.sh "$(VERSION)"
 
 postgres-up:
 	docker compose up -d postgres

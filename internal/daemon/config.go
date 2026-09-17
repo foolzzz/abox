@@ -13,45 +13,59 @@ import (
 )
 
 type Config struct {
-	HomeDirectory        string
-	ServerAddress        string
-	ServerTLS            bool
-	ServerName           string
-	HostID               string
-	EnrollmentToken      string
-	StateDirectory       string
-	WorkspaceRoots       []string
-	OMPBinary            string
-	ClaudeBinary         string
-	EnableClaude         bool
-	ClaudePermissionMode string
-	HealthAddress        string
-	MaxActiveBoxes       int
-	MaxRunDuration       time.Duration
-	HeartbeatInterval    time.Duration
-	ShutdownTimeout      time.Duration
-	RuntimeProbeTime     time.Duration
-	DaemonVersion        string
+	HomeDirectory          string
+	ServerAddress          string
+	ServerTLS              bool
+	ServerName             string
+	HostID                 string
+	EnrollmentToken        string
+	StateDirectory         string
+	WorkspaceRoots         []string
+	OMPBinary              string
+	ClaudeBinary           string
+	EnableClaude           bool
+	ClaudePermissionMode   string
+	HealthAddress          string
+	MaxActiveBoxes         int
+	MaxTerminalSessions    int
+	JournalMaxBytes        int64
+	JournalMaxRecords      int
+	JournalMaxRecordBytes  int
+	IdempotencyMaxFrames   int
+	IdempotencyMaxCommands int
+	MaxRunDuration         time.Duration
+	HeartbeatInterval      time.Duration
+	ShutdownTimeout        time.Duration
+	RuntimeProbeTime       time.Duration
+	RuntimeStateRetention  time.Duration
+	DaemonVersion          string
 }
 
 type daemonFileConfig struct {
-	ServerAddress        string   `json:"serverAddress"`
-	ServerTLS            bool     `json:"serverTLS"`
-	ServerName           string   `json:"serverName"`
-	HostID               string   `json:"hostId"`
-	EnrollmentToken      string   `json:"enrollmentToken"`
-	StateDirectory       string   `json:"stateDirectory"`
-	WorkspaceRoots       []string `json:"workspaceRoots"`
-	OMPBinary            string   `json:"ompBinary"`
-	ClaudeBinary         string   `json:"claudeBinary"`
-	EnableClaude         bool     `json:"enableClaude"`
-	ClaudePermissionMode string   `json:"claudePermissionMode"`
-	HealthAddress        string   `json:"healthAddress"`
-	MaxActiveBoxes       int      `json:"maxActiveBoxes"`
-	MaxRunDuration       string   `json:"maxRunDuration"`
-	HeartbeatInterval    string   `json:"heartbeatInterval"`
-	ShutdownTimeout      string   `json:"shutdownTimeout"`
-	RuntimeProbeTime     string   `json:"runtimeProbeTimeout"`
+	ServerAddress          string   `json:"serverAddress"`
+	ServerTLS              bool     `json:"serverTLS"`
+	ServerName             string   `json:"serverName"`
+	HostID                 string   `json:"hostId"`
+	EnrollmentToken        string   `json:"enrollmentToken"`
+	StateDirectory         string   `json:"stateDirectory"`
+	WorkspaceRoots         []string `json:"workspaceRoots"`
+	OMPBinary              string   `json:"ompBinary"`
+	ClaudeBinary           string   `json:"claudeBinary"`
+	EnableClaude           bool     `json:"enableClaude"`
+	ClaudePermissionMode   string   `json:"claudePermissionMode"`
+	HealthAddress          string   `json:"healthAddress"`
+	MaxActiveBoxes         int      `json:"maxActiveBoxes"`
+	MaxTerminalSessions    int      `json:"maxTerminalSessions"`
+	JournalMaxBytes        int64    `json:"journalMaxBytes"`
+	JournalMaxRecords      int      `json:"journalMaxRecords"`
+	JournalMaxRecordBytes  int      `json:"journalMaxRecordBytes"`
+	IdempotencyMaxFrames   int      `json:"idempotencyMaxFrames"`
+	IdempotencyMaxCommands int      `json:"idempotencyMaxCommands"`
+	MaxRunDuration         string   `json:"maxRunDuration"`
+	HeartbeatInterval      string   `json:"heartbeatInterval"`
+	ShutdownTimeout        string   `json:"shutdownTimeout"`
+	RuntimeProbeTime       string   `json:"runtimeProbeTimeout"`
+	RuntimeStateRetention  string   `json:"runtimeStateRetention"`
 }
 
 func DefaultHomeDirectory() (string, error) {
@@ -146,14 +160,22 @@ func LoadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	stateRetention, err := positiveDuration("runtimeStateRetention", raw.RuntimeStateRetention)
+	if err != nil {
+		return Config{}, err
+	}
 	result := Config{
 		HomeDirectory: home, ServerAddress: raw.ServerAddress, ServerTLS: raw.ServerTLS,
 		ServerName: raw.ServerName, HostID: raw.HostID, EnrollmentToken: raw.EnrollmentToken,
 		StateDirectory: stateDirectory, WorkspaceRoots: roots, OMPBinary: raw.OMPBinary,
 		ClaudeBinary: raw.ClaudeBinary, EnableClaude: raw.EnableClaude,
 		ClaudePermissionMode: raw.ClaudePermissionMode, HealthAddress: raw.HealthAddress,
-		MaxActiveBoxes: raw.MaxActiveBoxes, MaxRunDuration: maxRunDuration,
+		MaxActiveBoxes: raw.MaxActiveBoxes, MaxTerminalSessions: raw.MaxTerminalSessions,
+		JournalMaxBytes: raw.JournalMaxBytes, JournalMaxRecords: raw.JournalMaxRecords,
+		JournalMaxRecordBytes: raw.JournalMaxRecordBytes, IdempotencyMaxFrames: raw.IdempotencyMaxFrames,
+		IdempotencyMaxCommands: raw.IdempotencyMaxCommands, MaxRunDuration: maxRunDuration,
 		HeartbeatInterval: heartbeat, ShutdownTimeout: shutdown, RuntimeProbeTime: probe,
+		RuntimeStateRetention: stateRetention,
 	}
 	if err := result.Validate(); err != nil {
 		return Config{}, fmt.Errorf("validate agentboxd config %s: %w", path, err)
@@ -176,6 +198,9 @@ func (c Config) Validate() error {
 	if len(c.WorkspaceRoots) == 0 {
 		return errors.New("at least one workspace root is required")
 	}
+	if strings.TrimSpace(c.HostID) == "" && c.EnrollmentToken == "replace-me" {
+		return errors.New("replace placeholder enrollmentToken before first daemon start")
+	}
 	if c.EnableClaude && strings.TrimSpace(c.ClaudeBinary) == "" {
 		return errors.New("claudeBinary is required when enableClaude is true")
 	}
@@ -184,6 +209,18 @@ func (c Config) Validate() error {
 	}
 	if c.MaxActiveBoxes <= 0 || c.MaxActiveBoxes > 256 {
 		return errors.New("maxActiveBoxes must be between 1 and 256")
+	}
+	if c.MaxTerminalSessions <= 0 || c.MaxTerminalSessions > 256 {
+		return errors.New("maxTerminalSessions must be between 1 and 256")
+	}
+	if c.JournalMaxBytes < 1<<20 || c.JournalMaxBytes > 4<<30 {
+		return errors.New("journalMaxBytes must be between 1 MiB and 4 GiB")
+	}
+	if c.JournalMaxRecords < 100 || c.JournalMaxRecords > 1_000_000 || c.JournalMaxRecordBytes < 1<<10 || c.JournalMaxRecordBytes > 16<<20 {
+		return errors.New("journal record limits are outside supported bounds")
+	}
+	if c.IdempotencyMaxFrames < 100 || c.IdempotencyMaxFrames > 1_000_000 || c.IdempotencyMaxCommands < 100 || c.IdempotencyMaxCommands > 1_000_000 {
+		return errors.New("idempotency limits must be between 100 and 1000000")
 	}
 	if c.HeartbeatInterval < 100*time.Millisecond || c.HeartbeatInterval > 24*time.Hour {
 		return errors.New("heartbeatInterval must be between 100ms and 24h")
