@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +27,7 @@ import (
 type hostConnection struct {
 	hostID   string
 	outbound chan *domain.HostCommand
+	terminal chan *hostv1.TerminalInput
 	cancel   context.CancelCauseFunc
 }
 
@@ -83,6 +86,23 @@ func (h *hostHub) dispatch(hostID string, command *domain.HostCommand) bool {
 	}
 }
 
+func (h *hostHub) sendTerminal(hostID string, input *hostv1.TerminalInput) bool {
+	h.mu.RLock()
+	connection := h.connections[hostID]
+	if connection == nil {
+		h.mu.RUnlock()
+		return false
+	}
+	select {
+	case connection.terminal <- input:
+		h.mu.RUnlock()
+		return true
+	default:
+		h.mu.RUnlock()
+		return false
+	}
+}
+
 type receivedHostFrame struct {
 	frame *hostv1.HostFrame
 	err   error
@@ -111,6 +131,7 @@ func (s *Server) Connect(stream hostv1.HostService_ConnectServer) error {
 	connection := &hostConnection{
 		hostID:   persisted.ID,
 		outbound: make(chan *domain.HostCommand, 256),
+		terminal: make(chan *hostv1.TerminalInput, 256),
 		cancel:   cancel,
 	}
 	s.hosts.register(connection)
@@ -202,6 +223,13 @@ func (s *Server) Connect(stream hostv1.HostService_ConnectServer) error {
 		case command := <-connection.outbound:
 			if err := sendHostCommand(stream, command); err != nil {
 				return err
+			}
+		case terminal := <-connection.terminal:
+			if err := stream.Send(&hostv1.ServerFrame{
+				FrameId: uuid.NewString(),
+				Payload: &hostv1.ServerFrame_TerminalInput{TerminalInput: terminal},
+			}); err != nil {
+				return grpcStatus("send terminal input", err)
 			}
 		case timestamp := <-ping.C:
 			if err := stream.Send(&hostv1.ServerFrame{
@@ -363,9 +391,11 @@ func (s *Server) processHostFrame(ctx context.Context, host domain.Host, daemonI
 			return lastAcked, err
 		}
 	case frame.GetArtifactReady() != nil:
-		if err := s.processArtifact(ctx, host.ID, frame.GetFrameId(), frame.GetArtifactReady()); err != nil {
+		if err := s.processArtifact(ctx, host.ID, frame.GetArtifactReady()); err != nil {
 			return lastAcked, err
 		}
+	case frame.GetTerminalData() != nil:
+		s.terminals.publish(frame.GetTerminalData())
 	default:
 		return lastAcked, status.Error(codes.InvalidArgument, "host frame payload is required")
 	}
@@ -395,7 +425,7 @@ func (s *Server) processCommandAck(ctx context.Context, ack *hostv1.CommandAck) 
 	default:
 		return status.Error(codes.InvalidArgument, "command ack stage is required")
 	}
-	if err := s.store.UpdateHostCommand(ctx, ack.GetCommandId(), commandStatus, ack.GetErrorCode(), ack.GetErrorMessage()); err != nil {
+	if err := s.store.UpdateHostCommand(ctx, ack.GetCommandId(), commandStatus, ack.GetErrorCode(), ack.GetErrorMessage(), ack.GetResultJson()); err != nil {
 		return storeGRPCStatus("persist command ack", err)
 	}
 	return nil
@@ -512,9 +542,20 @@ func (s *Server) processRuntimeSnapshot(ctx context.Context, hostID, frameID str
 	return nil
 }
 
-func (s *Server) processArtifact(ctx context.Context, hostID, frameID string, artifact *hostv1.ArtifactReady) error {
+func (s *Server) processArtifact(ctx context.Context, hostID string, artifact *hostv1.ArtifactReady) error {
 	if strings.TrimSpace(artifact.GetBoxId()) == "" || strings.TrimSpace(artifact.GetArtifactId()) == "" {
 		return status.Error(codes.InvalidArgument, "artifact box_id and artifact_id are required")
+	}
+	if strings.TrimSpace(artifact.GetName()) == "" || strings.TrimSpace(artifact.GetPath()) == "" {
+		return status.Error(codes.InvalidArgument, "artifact name and path are required")
+	}
+	digest := strings.ToLower(strings.TrimSpace(artifact.GetSha256()))
+	decodedDigest, decodeErr := hex.DecodeString(digest)
+	if decodeErr != nil || len(decodedDigest) != sha256.Size {
+		return status.Error(codes.InvalidArgument, "artifact sha256 must be a 64-character hexadecimal digest")
+	}
+	if artifact.GetSizeBytes() > math.MaxInt64 {
+		return status.Error(codes.InvalidArgument, "artifact size exceeds the supported range")
 	}
 	box, err := s.store.GetBoxForHost(ctx, hostID, artifact.GetBoxId())
 	if err != nil {
@@ -524,8 +565,7 @@ func (s *Server) processArtifact(ctx context.Context, hostID, frameID string, ar
 	if err != nil {
 		return status.Error(codes.Internal, "artifact metadata could not be encoded")
 	}
-	daemonEventKey := "artifact:" + frameID + ":" + artifact.GetArtifactId()
-	daemonEventID := stableHostEventID(hostID, daemonEventKey)
+	daemonEventID := stableHostEventID(hostID, "artifact:"+artifact.GetArtifactId())
 	return s.appendApplyBroadcast(ctx, domain.BoxEvent{
 		OrganizationID: box.OrganizationID,
 		BoxID:          box.ID,

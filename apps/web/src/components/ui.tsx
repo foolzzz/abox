@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ButtonHTMLAttributes, type FormEvent, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
 import { humanize } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 import { Icon, type IconName } from "./Icon";
 
 export function cx(...values: Array<string | false | null | undefined>): string {
@@ -21,21 +22,31 @@ export function Button({ variant = "secondary", icon, busy, children, className,
     </button>
   );
 }
+const STATUS_ZH: Record<string, string> = {
+  online: "在线", ready: "就绪", idle: "空闲", running: "运行中", starting: "启动中",
+  dispatching: "正在下发", waiting_approval: "等待审批", pending: "待处理", approved: "已批准",
+  denied: "已拒绝", completed: "已完成", succeeded: "成功", failed: "失败", error: "错误",
+  offline: "离线", available: "可用", unavailable: "不可用", paused: "已暂停", active: "已启用",
+  hibernating: "休眠中", hibernated: "已休眠", cancelled: "已取消", expired: "已过期",
+  read_only: "只读", operator: "操作者", admin: "管理员", owner: "所有者", viewer: "查看者"
+};
+
 
 export function StatusChip({ status, compact = false }: { status: string; compact?: boolean }) {
-  const tone = ["online", "ready", "idle", "succeeded", "approved", "completed", "open", "available", "owner"].includes(status)
+  const { locale } = useI18n();
+  const tone = ["online", "ready", "idle", "succeeded", "approved", "completed", "open", "available", "owner", "active"].includes(status)
     ? "positive"
-    : ["running", "starting", "dispatching", "provisioning", "connecting", "operator", "admin"].includes(status)
+    : ["running", "starting", "dispatching", "claimed", "provisioning", "connecting", "operator", "admin", "in_progress"].includes(status)
       ? "active"
-      : ["waiting_approval", "pending", "enrolling", "draining", "retrying", "read_only"].includes(status)
+      : ["waiting_approval", "pending", "enrolling", "draining", "retrying", "read_only", "paused", "hibernating", "hibernated", "skipped", "parked"].includes(status)
         ? "warning"
-        : ["error", "failed", "offline", "revoked", "denied", "critical", "closed", "unavailable", "cancelled"].includes(status)
+        : ["error", "failed", "offline", "revoked", "denied", "critical", "closed", "unavailable", "cancelled", "expired", "deleted", "blocked", "abandoned"].includes(status)
           ? "negative"
           : "neutral";
   return (
     <span className={cx("status-chip", `status-chip--${tone}`, compact && "status-chip--compact")}>
       <span className="status-chip__dot" aria-hidden="true" />
-      {humanize(status)}
+      {locale === "zh-CN" ? STATUS_ZH[status] ?? humanize(status) : humanize(status)}
     </span>
   );
 }
@@ -153,7 +164,8 @@ export function Modal({
 }
 
 export function RefreshButton({ refreshing, onClick }: { refreshing?: boolean; onClick: () => void }) {
-  return <Button variant="ghost" icon="refresh" busy={refreshing} onClick={onClick}>Refresh</Button>;
+  const { t } = useI18n();
+  return <Button variant="ghost" icon="refresh" busy={refreshing} onClick={onClick}>{t("common.refresh")}</Button>;
 }
 
 export function InlineAlert({ children, tone = "error" }: { children: ReactNode; tone?: "error" | "success" | "warning" }) {

@@ -31,6 +31,26 @@ func (s *Server) runHibernationReaper(ctx context.Context) {
 	})
 }
 
+func (s *Server) runAutomationScheduler(ctx context.Context) {
+	s.runReaper(ctx, "automation scheduler", s.schedulePollInterval, func(runContext context.Context) error {
+		commands, err := s.store.ProcessDueSchedules(runContext, s.reaperBatchSize)
+		if err != nil {
+			return err
+		}
+		for index := range commands {
+			s.dispatch(&commands[index])
+		}
+		commands, err = s.store.DispatchAutomationRuns(runContext, s.reaperBatchSize)
+		if err != nil {
+			return err
+		}
+		for index := range commands {
+			s.dispatch(&commands[index])
+		}
+		return nil
+	})
+}
+
 func (s *Server) runReaper(ctx context.Context, name string, interval time.Duration, operation func(context.Context) error) {
 	backoff := time.Second
 	for {

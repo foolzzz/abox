@@ -1,14 +1,19 @@
 import { Shell } from "./components/Shell";
 import { ToastProvider } from "./components/Toast";
 import { Link, useLocation } from "./lib/router";
+import { useI18n } from "./lib/i18n";
 import { AgentsView } from "./views/AgentsView";
 import { ApprovalsView } from "./views/ApprovalsView";
+import { BoxAutomationView, type BoxAutomationPanel } from "./views/BoxAutomationView";
 import { BoxDetailView } from "./views/BoxDetailView";
 import { BoxesView } from "./views/BoxesView";
 import { DashboardView } from "./views/DashboardView";
 import { HostsView } from "./views/HostsView";
 import { MembersView } from "./views/MembersView";
+import { NotificationsView } from "./views/NotificationsView";
+import { SchedulesView } from "./views/SchedulesView";
 import { WorkspacesView } from "./views/WorkspacesView";
+import { TerminalView } from "./views/TerminalView";
 
 export function App() {
   const { pathname } = useLocation();
@@ -21,6 +26,13 @@ export function App() {
   else if (pathname === "/workspaces") content = <WorkspacesView />;
   else if (pathname === "/boxes") content = <BoxesView />;
   else if (pathname === "/approvals") content = <ApprovalsView />;
+  else if (pathname === "/schedules") content = <SchedulesView />;
+  else if (pathname === "/notifications") content = <NotificationsView />;
+  else if (/^\/boxes\/[^/]+\/terminal$/.test(pathname)) content = <TerminalView boxId={decodeURIComponent(pathname.slice("/boxes/".length, -"/terminal".length))} />;
+  else if (/^\/boxes\/[^/]+\/(subagents|todos|artifacts|diff)$/.test(pathname)) {
+    const [, boxId, panel] = pathname.match(/^\/boxes\/([^/]+)\/(subagents|todos|artifacts|diff)$/)!;
+    content = <BoxAutomationView boxId={decodeURIComponent(boxId!)} panel={panel as BoxAutomationPanel} />;
+  }
   else if (/^\/boxes\/[^/]+$/.test(pathname)) content = <BoxDetailView boxId={decodeURIComponent(pathname.slice("/boxes/".length))} />;
   else content = <NotFound />;
 
@@ -28,12 +40,13 @@ export function App() {
 }
 
 function NotFound() {
+  const { t } = useI18n();
   return (
     <div className="not-found">
       <span>404</span>
-      <h1>That view doesn’t exist.</h1>
-      <p>The address may be out of date, or the resource was removed.</p>
-      <Link className="button button--primary" to="/">Return to overview</Link>
+      <h1>{t("notFound.title")}</h1>
+      <p>{t("notFound.description")}</p>
+      <Link className="button button--primary" to="/">{t("notFound.return")}</Link>
     </div>
   );
 }

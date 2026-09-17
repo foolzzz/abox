@@ -82,6 +82,11 @@ func (s *Store) UpsertHost(ctx context.Context, host domain.Host, daemonInstance
 
 	var result domain.Host
 	err = s.withTx(ctx, func(tx pgx.Tx) error {
+		var previousStatus domain.HostStatus
+		previousErr := tx.QueryRow(ctx, `SELECT status FROM hosts WHERE id = $1 AND organization_id = $2 FOR UPDATE`, host.ID, host.OrganizationID).Scan(&previousStatus)
+		if previousErr != nil && !errors.Is(previousErr, pgx.ErrNoRows) {
+			return mapError("lock host state", previousErr)
+		}
 		var creatorID string
 		err := tx.QueryRow(ctx, `
             SELECT user_id
@@ -153,6 +158,31 @@ func (s *Store) UpsertHost(ctx context.Context, host domain.Host, daemonInstance
 				host.OrganizationID, host.ID, runtimeName)
 			if err != nil {
 				return mapError("upsert host runtime capability", err)
+			}
+		}
+		if host.Status == domain.HostOffline && previousStatus != domain.HostOffline {
+			if _, err := tx.Exec(ctx, `
+                UPDATE runs r
+                SET status = 'disconnected', version = r.version + 1
+                FROM boxes b
+                WHERE r.box_id = b.id AND b.host_id = $1
+                  AND r.status IN ('dispatching','running','interrupting')`, host.ID); err != nil {
+				return mapError("disconnect host runs", err)
+			}
+			if err := notifyHostOfflineTx(ctx, tx, host.OrganizationID, host.ID, host.Name,
+				"host-offline:"+host.ID+":"+daemonInstanceID); err != nil {
+				return err
+			}
+			if err := insertAudit(ctx, tx, host.OrganizationID, "daemon", "", host.ID,
+				"host.offline", "host", host.ID,
+				map[string]any{"daemonInstanceId": daemonInstanceID}); err != nil {
+				return err
+			}
+		} else if host.Status == domain.HostOnline && previousStatus == domain.HostOffline {
+			if err := insertAudit(ctx, tx, host.OrganizationID, "daemon", "", host.ID,
+				"host.online", "host", host.ID,
+				map[string]any{"daemonInstanceId": daemonInstanceID}); err != nil {
+				return err
 			}
 		}
 		result, err = getHost(ctx, tx, host.OrganizationID, host.ID)

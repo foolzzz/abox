@@ -7,6 +7,7 @@ import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, Modal, PageH
 import { useResource } from "../hooks/useResource";
 import { roleAtLeast, useAccess } from "../lib/access";
 import { formatDate } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 import { Link, navigate, useLocation } from "../lib/router";
 
 interface BoxListData {
@@ -18,6 +19,7 @@ interface BoxListData {
 
 export function BoxesView() {
   const { currentUser } = useAccess();
+  const { t } = useI18n();
   const location = useLocation();
   const resource = useResource<BoxListData>(async (signal) => {
     const [boxes, agents, hosts, workspaces] = await Promise.all([
@@ -33,7 +35,7 @@ export function BoxesView() {
   const canCreate = roleAtLeast(currentUser?.role, "operator");
   const createOpen = canCreate && new URLSearchParams(location.search).get("create") === "1";
 
-  if (resource.loading) return <LoadingState label="Loading boxes" />;
+  if (resource.loading) return <LoadingState label={t("boxes.loading")} />;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
 
   const data = resource.data!;
@@ -49,14 +51,14 @@ export function BoxesView() {
 
   return (
     <div className="page">
-      <PageHeader eyebrow="Live sessions" title="Boxes" description="Durable agent sessions bound to a host and workspace, visible according to resource sharing." actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/boxes?create=1")}>New box</Button> : null}</>} />
+      <PageHeader eyebrow={t("boxes.eyebrow")} title={t("boxes.title")} description={t("boxes.description")} actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/boxes?create=1")}>{t("boxes.new")}</Button> : null}</>} />
       {resource.error ? <InlineAlert tone="warning">Box state could not be refreshed. Showing the last loaded snapshot.</InlineAlert> : null}
       {!canCreate ? <p className="permission-caption">Your {currentUser?.role ?? "viewer"} role can open shared boxes in read-only mode. Operator access is required to create one.</p> : null}
       {data.boxes.length ? (
         <>
           <div className="list-toolbar">
-            <label className="search-field"><Icon name="search" /><span className="sr-only">Search boxes</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search boxes" /></label>
-            <label className="filter-field"><span className="sr-only">Filter by status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option><option value="running">Running</option><option value="idle">Idle</option><option value="waiting_approval">Waiting approval</option><option value="hibernated">Hibernated</option><option value="error">Error</option><option value="terminated">Terminated</option></select></label>
+            <label className="search-field"><Icon name="search" /><span className="sr-only">{t("boxes.search")}</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("boxes.search")} /></label>
+            <label className="filter-field"><span className="sr-only">Filter by status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">{t("boxes.allStatuses")}</option><option value="running">Running</option><option value="idle">Idle</option><option value="waiting_approval">Waiting approval</option><option value="hibernated">Hibernated</option><option value="error">Error</option><option value="terminated">Terminated</option></select></label>
           </div>
           {filtered.length ? (
             <section className="box-grid" aria-label="Agent boxes">

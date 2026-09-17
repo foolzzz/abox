@@ -34,6 +34,7 @@ type Daemon struct {
 	client     *hostclient.Client
 	manager    *Manager
 	health     *HealthStatus
+	terminal   *TerminalManager
 	healthHTTP *http.Server
 
 	closeOnce sync.Once
@@ -43,10 +44,6 @@ type Daemon struct {
 func New(config Config) (*Daemon, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
-	}
-	claudePolicy, err := clauderuntime.StaticPermissionPolicy(config.ClaudePermissionMode)
-	if err != nil {
-		return nil, fmt.Errorf("AGENTBOX_CLAUDE_PERMISSION_MODE: %w", err)
 	}
 	guard, err := NewWorkspaceGuard(config.WorkspaceRoots, config.StateDirectory)
 	if err != nil {
@@ -90,7 +87,21 @@ func New(config Config) (*Daemon, error) {
 		staticApprovalMode string
 	}{
 		{adapter: ompruntime.New(ompruntime.Config{Binary: config.OMPBinary}), binary: config.OMPBinary},
-		{adapter: clauderuntime.New(clauderuntime.WithBinary(config.ClaudeBinary)), binary: config.ClaudeBinary, staticApprovalMode: claudePolicy.Mode},
+	}
+	if config.EnableClaude {
+		claudePolicy, policyErr := clauderuntime.StaticPermissionPolicy(config.ClaudePermissionMode)
+		if policyErr != nil {
+			return nil, fmt.Errorf("claudePermissionMode: %w", policyErr)
+		}
+		runtimeCandidates = append(runtimeCandidates, struct {
+			adapter            runtimeapi.Adapter
+			binary             string
+			staticApprovalMode string
+		}{
+			adapter:            clauderuntime.New(clauderuntime.WithBinary(config.ClaudeBinary)),
+			binary:             config.ClaudeBinary,
+			staticApprovalMode: claudePolicy.Mode,
+		})
 	}
 	registrations := make([]AdapterRegistration, 0, len(runtimeCandidates))
 	advertisedRuntimes := make([]*hostv1.RuntimeCapability, 0, len(runtimeCandidates))
@@ -187,6 +198,14 @@ func New(config Config) (*Daemon, error) {
 	if err := manager.SetPublisher(client); err != nil {
 		return nil, err
 	}
+	terminal, err := NewTerminalManager(guard, func(data *hostv1.TerminalData) error {
+		_, publishErr := client.PublishTerminalData(context.Background(), data)
+		return publishErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	client.SetTerminalHandler(terminal)
 
 	cleanupJournal = false
 	cleanupConnection = false
@@ -196,6 +215,7 @@ func New(config Config) (*Daemon, error) {
 		journal:    journal,
 		client:     client,
 		manager:    manager,
+		terminal:   terminal,
 		health:     health,
 		healthHTTP: &http.Server{
 			Addr:              config.HealthAddress,
@@ -251,6 +271,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	cancel()
 
+	d.terminal.Close()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), d.config.ShutdownTimeout)
 	defer shutdownCancel()
 	if err := d.manager.Shutdown(shutdownCtx); err != nil {
@@ -318,16 +339,21 @@ func transport(config Config) (string, credentials.TransportCredentials, error) 
 }
 
 func EnsureStateEnvironment(config Config) error {
-	path, err := secureStateDirectory(config.StateDirectory)
-	if err != nil {
-		return err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	if info.Mode().Perm() != 0o700 {
-		return errors.New("daemon state directory permissions are not 0700")
+	for label, directory := range map[string]string{
+		"daemon home":  config.HomeDirectory,
+		"daemon state": config.StateDirectory,
+	} {
+		path, err := secureStateDirectory(directory)
+		if err != nil {
+			return fmt.Errorf("secure %s directory: %w", label, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if info.Mode().Perm() != 0o700 {
+			return fmt.Errorf("%s directory permissions are not 0700", label)
+		}
 	}
 	return nil
 }

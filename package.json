@@ -9,5 +9,8 @@
     "web:dev": "npm --workspace apps/web run dev",
     "web:build": "npm --workspace apps/web run build",
     "web:test": "npm --workspace apps/web run test"
+  },
+  "devDependencies": {
+    "ws": "^8.18.3"
   }
 }

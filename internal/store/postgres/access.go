@@ -85,6 +85,17 @@ func (s *Store) ListBoxACL(ctx context.Context, user domain.User, boxID string) 
 	return listBoxACL(ctx, s.pool, user.OrganizationID, boxID)
 }
 
+func (s *Store) AuthorizeBoxOperation(ctx context.Context, user domain.User, boxID string) error {
+	allowed, err := canOperateBox(ctx, s.pool, user, boxID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return fmt.Errorf("%w: box operator access required", storepkg.ErrForbidden)
+	}
+	return nil
+}
+
 func (s *Store) ReplaceBoxACL(ctx context.Context, user domain.User, boxID string, entries []domain.ResourceACLEntryInput) ([]domain.ResourceACL, error) {
 	if err := validateACLEntries(entries); err != nil {
 		return nil, err

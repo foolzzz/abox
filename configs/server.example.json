@@ -1,0 +1,16 @@
+{
+  "databaseUrl": "postgres://agentbox:agentbox@127.0.0.1:54329/agentbox?sslmode=disable",
+  "httpAddr": "127.0.0.1:8080",
+  "grpcAddr": "127.0.0.1:9443",
+  "publicUrl": "http://127.0.0.1:8080",
+  "developmentUser": "owner@example.com",
+  "enrollmentToken": "replace-me",
+  "webDir": "apps/web/dist",
+  "version": "dev",
+  "approvalPollInterval": "1s",
+  "hibernationPollInterval": "30s",
+  "schedulePollInterval": "1s",
+  "reaperBatchSize": 100,
+  "webhookSecret": "replace-me",
+  "enableClaude": false
+}

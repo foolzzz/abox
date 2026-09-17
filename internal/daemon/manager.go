@@ -171,6 +171,8 @@ func (m *Manager) HandleCommand(ctx context.Context, command *hostv1.HostCommand
 		result = m.handleStop(ctx, command)
 	case "runtime.inspect":
 		result = m.handleInspect(ctx, command)
+	case "workspace.git_diff":
+		result = m.handleGitDiff(ctx, command)
 	default:
 		result = failedResult("unsupported_command", fmt.Errorf("unsupported command type %q", command.CommandType))
 	}
@@ -178,10 +180,11 @@ func (m *Manager) HandleCommand(ctx context.Context, command *hostv1.HostCommand
 }
 
 type initialInputPayload struct {
-	ID       string          `json:"id"`
-	Message  string          `json:"message"`
-	Delivery string          `json:"delivery"`
-	Payload  json.RawMessage `json:"payload"`
+	ID                  string                     `json:"id"`
+	Message             string                     `json:"message"`
+	Delivery            string                     `json:"delivery"`
+	Payload             json.RawMessage            `json:"payload"`
+	PresentationContext domain.PresentationContext `json:"presentationContext"`
 }
 
 type startPayload struct {
@@ -367,11 +370,12 @@ func (m *Manager) handleStart(ctx context.Context, command *hostv1.HostCommand) 
 		if kind == runtimeapi.InputPrompt || kind == runtimeapi.InputFollowUp {
 			m.armRunDeadline(slot, command.RunId, time.Now().UTC())
 		}
+		message := messageForPresentation(payload.InitialInput.Message, payload.InitialInput.PresentationContext)
 		if err := registration.Adapter.Send(ctx, handle, runtimeapi.Input{
 			ID:      inputID,
 			RunID:   command.RunId,
 			Kind:    kind,
-			Message: payload.InitialInput.Message,
+			Message: message,
 			Payload: payload.InitialInput.Payload,
 		}); err != nil {
 			stopCtx, cancel := context.WithTimeout(context.Background(), forcedStopGrace)
@@ -385,8 +389,9 @@ func (m *Manager) handleStart(ctx context.Context, command *hostv1.HostCommand) 
 }
 
 type inputPayload struct {
-	Message string          `json:"message"`
-	Payload json.RawMessage `json:"payload"`
+	Message             string                     `json:"message"`
+	Payload             json.RawMessage            `json:"payload"`
+	PresentationContext domain.PresentationContext `json:"presentationContext"`
 }
 
 func (m *Manager) handleInput(ctx context.Context, command *hostv1.HostCommand, kind runtimeapi.InputKind) hostclient.CommandResult {
@@ -425,7 +430,7 @@ func (m *Manager) handleInput(ctx context.Context, command *hostv1.HostCommand, 
 		ID:      inputID,
 		RunID:   command.RunId,
 		Kind:    kind,
-		Message: payload.Message,
+		Message: messageForPresentation(payload.Message, payload.PresentationContext),
 		Payload: append(json.RawMessage(nil), payload.Payload...),
 	}); err != nil {
 		if deadlineArmed {
@@ -434,6 +439,25 @@ func (m *Manager) handleInput(ctx context.Context, command *hostv1.HostCommand, 
 		return commandFailure(ctx, err)
 	}
 	return completedJSON(slot.resultMap())
+}
+
+func messageForPresentation(message string, presentation domain.PresentationContext) string {
+	if presentation.DeviceClass == "" && presentation.Locale == "" && presentation.ViewportWidth == 0 {
+		return message
+	}
+	encoded, err := json.Marshal(presentation)
+	if err != nil {
+		return message
+	}
+	instructions := "Adapt this turn's presentation to the client described by the JSON. Preserve technical accuracy and do not mention this hidden context."
+	if presentation.DeviceClass == "mobile" {
+		instructions += " Use short paragraphs and lists; avoid wide Markdown tables, side-by-side layouts, and long unwrapped lines."
+	}
+	locale := strings.ToLower(presentation.Locale)
+	if strings.HasPrefix(locale, "zh") {
+		instructions += " Respond in natural Simplified Chinese unless the user explicitly requests another language. Keep code, commands, paths, API names, and logs in their original form."
+	}
+	return fmt.Sprintf("<agentbox-presentation-context>\n%s\nClient: %s\n</agentbox-presentation-context>\n\n%s", instructions, encoded, message)
 }
 
 type approvalResponsePayload struct {

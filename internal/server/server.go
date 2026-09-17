@@ -36,6 +36,9 @@ type Options struct {
 	ApprovalPollInterval    time.Duration
 	HibernationPollInterval time.Duration
 	ReaperBatchSize         int
+	SchedulePollInterval    time.Duration
+	WebhookSecret           string
+	EnableClaude            bool
 	HeartbeatInterval       time.Duration
 	HostPendingCommandLimit int
 	SSEReplayLimit          int
@@ -56,14 +59,18 @@ type Server struct {
 	approvalPollInterval    time.Duration
 	hibernationPollInterval time.Duration
 	reaperBatchSize         int
+	schedulePollInterval    time.Duration
+	webhookSecret           string
+	enableClaude            bool
 	heartbeatInterval       time.Duration
 	hostCommandLimit        int
 	replayLimit             int
 
-	events  *eventHub
-	hosts   *hostHub
-	metrics *metrics
-	router  http.Handler
+	events    *eventHub
+	hosts     *hostHub
+	terminals *terminalHub
+	metrics   *metrics
+	router    http.Handler
 }
 
 func New(options Options) (*Server, error) {
@@ -94,6 +101,9 @@ func New(options Options) (*Server, error) {
 	if options.ReaperBatchSize <= 0 {
 		options.ReaperBatchSize = 100
 	}
+	if options.SchedulePollInterval <= 0 {
+		options.SchedulePollInterval = time.Second
+	}
 	if options.HeartbeatInterval <= 0 {
 		options.HeartbeatInterval = 15 * time.Second
 	}
@@ -119,11 +129,15 @@ func New(options Options) (*Server, error) {
 		approvalPollInterval:    options.ApprovalPollInterval,
 		hibernationPollInterval: options.HibernationPollInterval,
 		reaperBatchSize:         options.ReaperBatchSize,
+		schedulePollInterval:    options.SchedulePollInterval,
+		enableClaude:            options.EnableClaude,
+		webhookSecret:           strings.TrimSpace(options.WebhookSecret),
 		heartbeatInterval:       options.HeartbeatInterval,
 		hostCommandLimit:        options.HostPendingCommandLimit,
 		replayLimit:             options.SSEReplayLimit,
 		events:                  newEventHub(options.SSESubscriberBuffer, metricSet),
 		hosts:                   newHostHub(metricSet),
+		terminals:               newTerminalHub(),
 		metrics:                 metricSet,
 	}
 	server.router = server.routes()
@@ -141,6 +155,7 @@ func (s *Server) RegisterGRPC(registrar grpc.ServiceRegistrar) {
 func (s *Server) Run(ctx context.Context) {
 	go s.runApprovalReaper(ctx)
 	go s.runHibernationReaper(ctx)
+	go s.runAutomationScheduler(ctx)
 	<-ctx.Done()
 }
 
@@ -153,6 +168,7 @@ func (s *Server) routes() http.Handler {
 	router.Get("/healthz", s.handleHealth)
 	router.Get("/readyz", s.handleReady)
 	router.Get("/metrics", s.metrics.handle)
+	router.Post("/api/v1/webhooks/schedules/{scheduleID}", s.handleScheduleWebhook)
 
 	router.Route("/api/v1", func(api chi.Router) {
 		api.Use(s.authenticate)
@@ -190,6 +206,23 @@ func (s *Server) routes() http.Handler {
 
 		api.With(s.requireRole(roleViewer)).Get("/approvals", s.handleListApprovals)
 		api.With(s.requireRole(roleViewer)).Post("/approvals/{approvalID}/decision", s.handleDecideApproval)
+
+		api.With(s.requireRole(roleViewer)).Get("/schedules", s.handleListSchedules)
+		api.With(s.requireRole(roleViewer)).Post("/schedules", s.handleCreateSchedule)
+		api.With(s.requireRole(roleViewer)).Patch("/schedules/{scheduleID}", s.handleUpdateSchedule)
+		api.With(s.requireRole(roleViewer)).Delete("/schedules/{scheduleID}", s.handleDeleteSchedule)
+		api.With(s.requireRole(roleViewer)).Get("/schedules/{scheduleID}/executions", s.handleListScheduleExecutions)
+
+		api.With(s.requireRole(roleViewer)).Get("/notifications", s.handleListNotifications)
+		api.With(s.requireRole(roleViewer)).Post("/notifications/{notificationID}/read", s.handleMarkNotificationRead)
+		api.With(s.requireRole(roleViewer)).Post("/notifications/read-all", s.handleMarkAllNotificationsRead)
+
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/subagents", s.handleListSubagents)
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/todos", s.handleListTodos)
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/artifacts", s.handleListArtifacts)
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/artifacts/{artifactID}/download", s.handleDownloadArtifact)
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/diff", s.handleWorkspaceDiff)
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/terminal", s.handleTerminal)
 	})
 
 	if strings.TrimSpace(s.staticDir) != "" {
@@ -239,6 +272,13 @@ func (s *Server) handleMeta(writer http.ResponseWriter, request *http.Request) {
 		"serverVersion":    s.serverVersion,
 		"apiVersion":       defaultAPIVersion,
 		"minDaemonVersion": "0.1.0",
+		"enabledRuntimes": func() []string {
+			result := []string{"omp"}
+			if s.enableClaude {
+				result = append(result, "claude")
+			}
+			return result
+		}(),
 		"currentUser": map[string]string{
 			"id":          user.ID,
 			"login":       user.Login,

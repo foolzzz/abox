@@ -24,11 +24,12 @@ const (
 )
 
 var capabilities = runtime.Capabilities{
-	Steer:          true,
-	FollowUp:       true,
-	SubagentEvents: true,
-	TodoEvents:     true,
-	Resume:         true,
+	Steer:               true,
+	FollowUp:            true,
+	SubagentEvents:      true,
+	TodoEvents:          true,
+	Resume:              true,
+	InteractiveApproval: true,
 }
 
 // Config controls the local OMP process and the adapter's memory bounds.
@@ -232,6 +233,9 @@ func (a *Adapter) Send(ctx context.Context, handle runtime.Handle, input runtime
 	if err != nil {
 		return err
 	}
+	if input.Kind == runtime.InputApprovalResponse {
+		return h.sendApprovalResponse(ctx, input)
+	}
 
 	var command string
 	extra := make(map[string]any)
@@ -256,8 +260,6 @@ func (a *Adapter) Send(ctx context.Context, handle runtime.Handle, input runtime
 		command = "steer"
 	case runtime.InputFollowUp:
 		command = "follow_up"
-	case runtime.InputApprovalResponse:
-		return &Error{Op: "send", Code: codeUnsupportedInput, Command: string(input.Kind), Err: errors.New("OMP extension UI approval bridging is not enabled by this adapter")}
 	default:
 		return &Error{Op: "send", Code: codeUnsupportedInput, Command: string(input.Kind), Err: errors.New("unsupported runtime input kind")}
 	}
@@ -286,8 +288,9 @@ func (a *Adapter) Interrupt(ctx context.Context, handle runtime.Handle) error {
 	if err != nil {
 		return err
 	}
-	_, err = h.sendCommand(ctx, "abort", nil)
-	return err
+	cancelErr := h.cancelPendingApprovals("interrupted", true)
+	_, abortErr := h.sendCommand(ctx, "abort", nil)
+	return errors.Join(cancelErr, abortErr)
 }
 
 func (a *Adapter) Stop(ctx context.Context, handle runtime.Handle, mode runtime.StopMode) error {
@@ -304,17 +307,16 @@ func (a *Adapter) Stop(ctx context.Context, handle runtime.Handle, mode runtime.
 		return nil
 	default:
 	}
-	var stopErr error
+	h.setStatus("stopping")
+	stopErr := h.cancelPendingApprovals("stopped", true)
 	switch mode {
 	case runtime.StopGraceful:
-		h.setStatus("stopping")
 		if err := h.closeStdin(); err != nil && !errors.Is(err, os.ErrClosed) {
-			stopErr = err
+			stopErr = errors.Join(stopErr, err)
 		}
 	case runtime.StopForce:
-		h.setStatus("stopping")
 		if err := terminateProcessGroup(h.cmd, true); err != nil && !processAlreadyDone(err) {
-			stopErr = err
+			stopErr = errors.Join(stopErr, err)
 		}
 	default:
 		return &Error{Op: "stop", Code: codeInvalidSpec, Err: fmt.Errorf("unknown stop mode %q", mode)}

@@ -82,6 +82,8 @@ type ompHandle struct {
 	pendingMu   sync.Mutex
 	pending     map[string]pendingCommand
 	lateRuns    map[string]string
+	approvalMu  sync.Mutex
+	approvals   map[string]*pendingApproval
 
 	stateMu      sync.RWMutex
 	state        runtime.State
@@ -115,6 +117,7 @@ func newHandle(adapter *Adapter, cmd *exec.Cmd, stdin io.WriteCloser, stdout, st
 		maxFrameBytes:   adapter.config.MaxFrameBytes,
 		pending:         make(map[string]pendingCommand),
 		lateRuns:        make(map[string]string),
+		approvals:       make(map[string]*pendingApproval),
 		sessionRef:      spec.SessionRef,
 		runID:           spec.RunID,
 		state: runtime.State{
@@ -341,6 +344,7 @@ func (h *ompHandle) waitProcess() {
 		pendingErr = &Error{Op: "wait", Code: codeRuntimeStopped, Stderr: h.stderr.String(), Err: errors.New("OMP process exited")}
 	}
 	h.failPending(pendingErr)
+	_ = h.cancelPendingApprovals("process_exit", false)
 	h.setStatus("exited")
 
 	payload := map[string]any{
@@ -509,6 +513,7 @@ func (h *ompHandle) fail(err error) {
 	if !h.setFatal(err) {
 		return
 	}
+	_ = h.cancelPendingApprovals("runtime_failure", false)
 	h.failPending(err)
 	_ = h.closeStdin()
 	_ = terminateProcessGroup(h.cmd, true)

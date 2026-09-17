@@ -18,7 +18,7 @@ const messageSelect = `
            m.box_seq, m.author_type, COALESCE(m.author_user_id::text, ''),
            CASE WHEN m.author_type = 'user' THEN COALESCE(u.display_name, '') ELSE '' END,
            m.role, COALESCE(m.delivery, ''), m.status, m.content,
-           COALESCE(m.plain_text, ''), m.created_at
+           COALESCE(m.plain_text, ''), m.presentation_context, m.created_at
     FROM messages m
     LEFT JOIN users u ON u.id = m.author_user_id`
 
@@ -76,6 +76,10 @@ func (s *Store) SendMessage(ctx context.Context, user domain.User, boxID string,
 	content, err := json.Marshal([]map[string]string{{"type": "text", "text": input.Content}})
 	if err != nil {
 		return domain.Message{}, nil, nil, fmt.Errorf("encode message content: %w", err)
+	}
+	presentationContext, err := json.Marshal(input.PresentationContext)
+	if err != nil {
+		return domain.Message{}, nil, nil, fmt.Errorf("encode presentation context: %w", err)
 	}
 
 	var message domain.Message
@@ -176,10 +180,10 @@ func (s *Store) SendMessage(ctx context.Context, user domain.User, boxID string,
 		_, err = tx.Exec(ctx, `
             INSERT INTO messages(
                 id, organization_id, box_id, box_seq, author_type, author_user_id,
-                role, delivery, status, content, plain_text, idempotency_key
-            ) VALUES ($1,$2,$3,$4,'user',$5,'user',$6,$7,$8,$9,$10)`,
+                role, delivery, status, content, plain_text, presentation_context, idempotency_key
+            ) VALUES ($1,$2,$3,$4,'user',$5,'user',$6,$7,$8,$9,$10,$11)`,
 			messageID, organizationID, boxID, boxSeq, user.ID, string(input.Delivery),
-			initialStatus, content, input.Content, input.IdempotencyKey,
+			initialStatus, content, input.Content, presentationContext, input.IdempotencyKey,
 		)
 		if err != nil {
 			return mapError("insert message", err)
@@ -190,7 +194,7 @@ func (s *Store) SendMessage(ctx context.Context, user domain.User, boxID string,
 				return mapError("attach steer message", err)
 			}
 			commandValue, err := createInputCommandTx(ctx, tx, organizationID, hostID, boxID,
-				activeRunID, activeRuntimeID, messageID, input.Delivery, input.Content)
+				activeRunID, activeRuntimeID, messageID, input.Delivery, input.Content, presentationContext)
 			if err != nil {
 				return err
 			}
@@ -388,7 +392,7 @@ func claimNextRunTx(ctx context.Context, tx pgx.Tx, boxID string) (domain.Run, d
 func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.HostCommand, error) {
 	var organizationID, hostID, runtimeType, workspacePath, model, delivery, messageID, messageText string
 	var daemonInstanceID *string
-	var configSnapshot []byte
+	var configSnapshot, presentationContext []byte
 	err := tx.QueryRow(ctx, `
         SELECT b.organization_id, b.host_id, b.runtime_type, w.real_path,
                COALESCE(av.model, ''), h.current_daemon_instance_id::text,
@@ -399,7 +403,7 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
                    'skillPolicy', av.skill_policy,
                    'approvalPolicy', av.approval_policy,
                    'runtimeConfig', av.runtime_config
-               ), m.delivery, m.id, COALESCE(m.plain_text, '')
+               ), m.delivery, m.id, COALESCE(m.plain_text, ''), m.presentation_context
         FROM runs r
         JOIN boxes b ON b.id = r.box_id AND b.organization_id = r.organization_id
         JOIN workspaces w ON w.id = b.workspace_id
@@ -409,7 +413,7 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
         WHERE r.id = $1 AND b.id = $2
         FOR UPDATE OF r`, runID, boxID).Scan(
 		&organizationID, &hostID, &runtimeType, &workspacePath, &model,
-		&daemonInstanceID, &configSnapshot, &delivery, &messageID, &messageText,
+		&daemonInstanceID, &configSnapshot, &delivery, &messageID, &messageText, &presentationContext,
 	)
 	if err != nil {
 		return domain.HostCommand{}, mapError("load run dispatch", err)
@@ -428,7 +432,7 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
 			return domain.HostCommand{}, mapError("attach active runtime to run", err)
 		}
 		return createInputCommandTx(ctx, tx, organizationID, hostID, boxID,
-			runID, runtimeInstanceID, messageID, domain.Delivery(delivery), messageText)
+			runID, runtimeInstanceID, messageID, domain.Delivery(delivery), messageText, presentationContext)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return domain.HostCommand{}, mapError("find active runtime", err)
@@ -461,19 +465,30 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
 		"workspace":         workspacePath,
 		"subagentEventMode": "events",
 		"initialInput": map[string]any{
-			"id":       messageID,
-			"message":  messageText,
-			"delivery": delivery,
+			"id":                  messageID,
+			"message":             messageText,
+			"delivery":            delivery,
+			"presentationContext": json.RawMessage(presentationContext),
 		},
 	}
 	var runtimeSnapshot struct {
-		SystemPrompt string `json:"systemPrompt"`
+		SystemPrompt   string `json:"systemPrompt"`
+		ApprovalPolicy struct {
+			Mode string `json:"mode"`
+		} `json:"approvalPolicy"`
 	}
 	if err := json.Unmarshal(configSnapshot, &runtimeSnapshot); err != nil {
 		return domain.HostCommand{}, fmt.Errorf("decode runtime config snapshot: %w", err)
 	}
 	if runtimeSnapshot.SystemPrompt != "" {
 		startPayload["systemPrompt"] = runtimeSnapshot.SystemPrompt
+	}
+	approvalMode := strings.TrimSpace(runtimeSnapshot.ApprovalPolicy.Mode)
+	if approvalMode == "" && runtimeType == "omp" {
+		approvalMode = "always-ask"
+	}
+	if approvalMode != "" {
+		startPayload["approvalMode"] = approvalMode
 	}
 	if model != "" {
 		startPayload["model"] = model
@@ -504,7 +519,7 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
 	return command, nil
 }
 
-func createInputCommandTx(ctx context.Context, tx pgx.Tx, organizationID, hostID, boxID, runID, runtimeInstanceID, messageID string, delivery domain.Delivery, messageText string) (domain.HostCommand, error) {
+func createInputCommandTx(ctx context.Context, tx pgx.Tx, organizationID, hostID, boxID, runID, runtimeInstanceID, messageID string, delivery domain.Delivery, messageText string, presentationContext []byte) (domain.HostCommand, error) {
 	commandType := "runtime.prompt"
 	switch delivery {
 	case domain.DeliveryFollowUp:
@@ -512,7 +527,7 @@ func createInputCommandTx(ctx context.Context, tx pgx.Tx, organizationID, hostID
 	case domain.DeliverySteer:
 		commandType = "runtime.steer"
 	}
-	payload, err := json.Marshal(map[string]any{"message": messageText})
+	payload, err := json.Marshal(map[string]any{"message": messageText, "presentationContext": json.RawMessage(presentationContext)})
 	if err != nil {
 		return domain.HostCommand{}, fmt.Errorf("encode runtime input command: %w", err)
 	}
@@ -602,17 +617,18 @@ func getMessage(ctx context.Context, q querier, id string) (domain.Message, erro
 
 func scanMessage(row scanner) (domain.Message, error) {
 	var result domain.Message
-	var content []byte
+	var content, presentationContext []byte
 	err := row.Scan(
 		&result.ID, &result.OrganizationID, &result.BoxID, &result.RunID,
 		&result.BoxSeq, &result.AuthorType, &result.AuthorUserID, &result.AuthorName,
 		&result.Role, &result.Delivery, &result.Status, &content,
-		&result.PlainText, &result.CreatedAt,
+		&result.PlainText, &presentationContext, &result.CreatedAt,
 	)
 	if err != nil {
 		return domain.Message{}, err
 	}
 	result.Content = json.RawMessage(append([]byte(nil), content...))
+	result.PresentationContext = json.RawMessage(append([]byte(nil), presentationContext...))
 	return result, nil
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,17 +24,21 @@ import (
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
-	if err := run(logger); err != nil {
+	configPath := flag.String("config", "", "path to agentbox-server JSON configuration")
+	flag.Parse()
+	if err := run(logger, *configPath); err != nil {
 		logger.Error("agentbox-server stopped", "component", "agentbox-server", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger) error {
+func run(logger *slog.Logger, configPath string) error {
 	rootContext, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	configuration := config.Load()
-
+	configuration, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
 	dataStore, err := storepostgres.New(rootContext, configuration.DatabaseURL)
 	if err != nil {
 		return err
@@ -42,7 +47,7 @@ func run(logger *slog.Logger) error {
 	if err := dataStore.Migrate(rootContext); err != nil {
 		return err
 	}
-	developmentUser, err := dataStore.EnsureDevelopmentTenant(rootContext, configuration.DevUser)
+	developmentUser, err := dataStore.EnsureDevelopmentTenant(rootContext, configuration.DevelopmentUser)
 	if err != nil {
 		return err
 	}
@@ -52,8 +57,8 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	developmentIdentity, err := identity.NewDevelopmentExtractor(true, identity.Principal{
-		LoginName:   configuration.DevUser,
-		DisplayName: configuration.DevUser,
+		LoginName:   configuration.DevelopmentUser,
+		DisplayName: configuration.DevelopmentUser,
 	}, identity.LoopbackTrust{})
 	if err != nil {
 		return err
@@ -68,12 +73,15 @@ func run(logger *slog.Logger) error {
 		Identity:                identityExtractor,
 		DevelopmentUser:         developmentUser,
 		EnrollmentToken:         configuration.EnrollmentToken,
-		ServerVersion:           environment("AGENTBOX_VERSION", "dev"),
-		StaticDir:               os.Getenv("AGENTBOX_WEB_DIR"),
+		ServerVersion:           configuration.Version,
+		StaticDir:               configuration.WebDir,
 		Logger:                  logger,
 		ApprovalPollInterval:    configuration.ApprovalPollInterval,
 		HibernationPollInterval: configuration.HibernationPollInterval,
+		SchedulePollInterval:    configuration.SchedulePollInterval,
 		ReaperBatchSize:         configuration.ReaperBatchSize,
+		WebhookSecret:           configuration.WebhookSecret,
+		EnableClaude:            configuration.EnableClaude,
 	})
 	if err != nil {
 		return err
@@ -148,11 +156,4 @@ func run(logger *slog.Logger) error {
 		<-grpcStopped
 	}
 	return serveErr
-}
-
-func environment(name, fallback string) string {
-	if value := os.Getenv(name); value != "" {
-		return value
-	}
-	return fallback
 }

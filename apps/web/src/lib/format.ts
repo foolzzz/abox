@@ -1,37 +1,28 @@
 import { isObjectRecord } from "./data";
+import { activeLocale } from "./i18n";
 
-const DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit"
-});
-
-const TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
-  hour: "numeric",
-  minute: "2-digit",
-  second: "2-digit"
-});
 
 export function formatDate(value?: string | null): string {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : DATE_FORMAT.format(date);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(activeLocale(), { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
 export function formatTime(value?: string | null): string {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : TIME_FORMAT.format(date);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(activeLocale(), { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(date);
 }
 
 export function relativeTime(value?: string | null): string {
-  if (!value) return "Unknown";
+  if (!value) return activeLocale() === "zh-CN" ? "未知" : "Unknown";
   const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) return "Unknown";
+  if (Number.isNaN(timestamp)) return activeLocale() === "zh-CN" ? "未知" : "Unknown";
   const deltaSeconds = Math.round((timestamp - Date.now()) / 1_000);
   const absolute = Math.abs(deltaSeconds);
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const formatter = new Intl.RelativeTimeFormat(activeLocale(), { numeric: "auto" });
   if (absolute < 60) return formatter.format(deltaSeconds, "second");
   if (absolute < 3_600) return formatter.format(Math.round(deltaSeconds / 60), "minute");
   if (absolute < 86_400) return formatter.format(Math.round(deltaSeconds / 3_600), "hour");

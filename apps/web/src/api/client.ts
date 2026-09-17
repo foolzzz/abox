@@ -4,20 +4,30 @@ import type {
   Agent,
   Approval,
   ApprovalDecisionRequest,
+  Artifact,
   Box,
   BoxSnapshot,
   CreateAgentRequest,
   CreateBoxRequest,
+  CreateScheduleRequest,
   CreateWorkspaceRequest,
   Host,
   Member,
   Message,
   Meta,
+  Notification,
+  PendingWorkspaceDiff,
   ReplaceAccessControlRequest,
+  Schedule,
+  ScheduleExecution,
   SendMessageRequest,
+  SubagentInstance,
   Team,
+  TodoItem,
   UpdateMemberRoleRequest,
-  Workspace
+  UpdateScheduleRequest,
+  Workspace,
+  WorkspaceDiff
 } from "./types";
 
 const API_BASE = "/api/v1";
@@ -71,6 +81,22 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const text = await response.text();
   return (text ? JSON.parse(text) : undefined) as T;
+}
+
+async function download(path: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await fetch(`${API_BASE}${path}`, { credentials: "same-origin", signal });
+  if (!response.ok) {
+    const body = await readBody(response);
+    const nested = isObjectRecord(body?.error) ? body.error : undefined;
+    const message =
+      (typeof nested?.message === "string" && nested.message) ||
+      (typeof body?.message === "string" && body.message) ||
+      (typeof body?.error === "string" && body.error) ||
+      `${response.status} ${response.statusText}`;
+    const code = (typeof nested?.code === "string" && nested.code) || (typeof body?.code === "string" && body.code) || undefined;
+    throw new ApiError(message, response.status, code, body?.details);
+  }
+  return response.blob();
 }
 
 async function readBody(response: Response): Promise<Record<string, unknown> | undefined> {
@@ -132,7 +158,31 @@ export const api = {
     request<void>(`/boxes/${encode(boxId)}/resume`, { method: "POST", signal }),
   listApprovals: (signal?: AbortSignal) => request<Approval[]>("/approvals", { signal }),
   decideApproval: (approvalId: string, body: ApprovalDecisionRequest, signal?: AbortSignal) =>
-    request<Approval>(`/approvals/${encode(approvalId)}/decision`, { method: "POST", body, signal })
+    request<Approval>(`/approvals/${encode(approvalId)}/decision`, { method: "POST", body, signal }),
+  listSchedules: (signal?: AbortSignal) => request<Schedule[]>("/schedules", { signal }),
+  createSchedule: (body: CreateScheduleRequest, signal?: AbortSignal) =>
+    request<Schedule>("/schedules", { method: "POST", body, signal }),
+  updateSchedule: (scheduleId: string, body: UpdateScheduleRequest, signal?: AbortSignal) =>
+    request<Schedule>(`/schedules/${encode(scheduleId)}`, { method: "PATCH", body, signal }),
+  deleteSchedule: (scheduleId: string, signal?: AbortSignal) =>
+    request<void>(`/schedules/${encode(scheduleId)}`, { method: "DELETE", signal }),
+  listScheduleExecutions: (scheduleId: string, signal?: AbortSignal) =>
+    request<ScheduleExecution[]>(`/schedules/${encode(scheduleId)}/executions`, { signal }),
+  listNotifications: (signal?: AbortSignal) => request<Notification[]>("/notifications", { signal }),
+  markNotificationRead: (notificationId: string, signal?: AbortSignal) =>
+    request<Notification>(`/notifications/${encode(notificationId)}/read`, { method: "POST", signal }),
+  markAllNotificationsRead: (signal?: AbortSignal) =>
+    request<void>("/notifications/read-all", { method: "POST", signal }),
+  listBoxSubagents: (boxId: string, signal?: AbortSignal) =>
+    request<SubagentInstance[]>(`/boxes/${encode(boxId)}/subagents`, { signal }),
+  listBoxTodos: (boxId: string, signal?: AbortSignal) =>
+    request<TodoItem[]>(`/boxes/${encode(boxId)}/todos`, { signal }),
+  listBoxArtifacts: (boxId: string, signal?: AbortSignal) =>
+    request<Artifact[]>(`/boxes/${encode(boxId)}/artifacts`, { signal }),
+  getBoxDiff: (boxId: string, signal?: AbortSignal) =>
+    request<WorkspaceDiff | PendingWorkspaceDiff>(`/boxes/${encode(boxId)}/diff`, { signal }),
+  downloadArtifact: (boxId: string, artifactId: string, signal?: AbortSignal) =>
+    download(`/boxes/${encode(boxId)}/artifacts/${encode(artifactId)}/download`, signal)
 };
 
 export function errorMessage(error: unknown): string {

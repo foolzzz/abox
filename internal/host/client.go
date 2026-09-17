@@ -73,6 +73,10 @@ type ServerHooks interface {
 	OnConfigUpdate(ctx context.Context, update *hostv1.ConfigUpdate) error
 }
 
+type TerminalHandler interface {
+	HandleTerminal(ctx context.Context, input *hostv1.TerminalInput) error
+}
+
 type ConnectionObserver interface {
 	Connected(welcome *hostv1.Welcome)
 	Disconnected(err error)
@@ -115,6 +119,8 @@ type Client struct {
 	serverHooks       ServerHooks
 	heartbeatProvider HeartbeatProvider
 	observer          ConnectionObserver
+	terminalMu        sync.RWMutex
+	terminalHandler   TerminalHandler
 
 	hostID            string
 	enrollmentToken   string
@@ -211,6 +217,23 @@ func NewClient(config ClientConfig) (*Client, error) {
 		asyncErrors:       make(chan error, 32),
 		fatalErrors:       make(chan error, 1),
 	}, nil
+}
+
+func (c *Client) SetTerminalHandler(handler TerminalHandler) {
+	c.terminalMu.Lock()
+	c.terminalHandler = handler
+	c.terminalMu.Unlock()
+}
+
+func (c *Client) PublishTerminalData(ctx context.Context, data *hostv1.TerminalData) (uint64, error) {
+	if data == nil || data.GetSessionId() == "" {
+		return 0, protocolError("publish terminal data", CodeProtocol, errors.New("terminal session ID is required"))
+	}
+	frame, err := c.enqueue(&hostv1.HostFrame{Payload: &hostv1.HostFrame_TerminalData{TerminalData: proto.Clone(data).(*hostv1.TerminalData)}})
+	if err != nil {
+		return 0, err
+	}
+	return frame.HostSeq, nil
 }
 
 func (c *Client) Run(ctx context.Context) error {
@@ -526,6 +549,16 @@ func (c *Client) receiveLoop(sessionCtx, commandCtx context.Context, stream host
 		case *hostv1.ServerFrame_Ping:
 			if err := c.queueHeartbeat(sessionCtx); err != nil {
 				return err
+			}
+		case *hostv1.ServerFrame_TerminalInput:
+			c.terminalMu.RLock()
+			handler := c.terminalHandler
+			c.terminalMu.RUnlock()
+			if handler == nil {
+				return protocolError("handle terminal input", CodeConfiguration, errors.New("terminal handler is not configured"))
+			}
+			if err := handler.HandleTerminal(commandCtx, proto.Clone(payload.TerminalInput).(*hostv1.TerminalInput)); err != nil {
+				return protocolError("handle terminal input", CodeCommand, err)
 			}
 		case *hostv1.ServerFrame_Welcome:
 			return protocolError("receive server frame", CodeProtocol, errors.New("unexpected welcome on established stream"))

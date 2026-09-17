@@ -21,7 +21,9 @@ const hostCommandSelect = `
 
 const approvalSelect = `
     SELECT a.id, a.organization_id, a.box_id, a.run_id, a.tool_name,
-           a.risk_level, a.status, a.requested_payload, a.expires_at
+           a.risk_level, a.status, a.requested_payload,
+           COALESCE(a.decision_payload, 'null'::jsonb), a.requested_at,
+           a.expires_at, a.resolved_at, COALESCE(a.resolved_by_user_id::text, '')
     FROM approvals a`
 
 func (s *Store) CreateHostCommand(ctx context.Context, user domain.User, command domain.HostCommand) (domain.HostCommand, error) {
@@ -231,7 +233,7 @@ func (s *Store) PendingHostCommands(ctx context.Context, hostID string, limit in
 	return result, nil
 }
 
-func (s *Store) UpdateHostCommand(ctx context.Context, commandID, status, errorCode, errorMessage string) error {
+func (s *Store) UpdateHostCommand(ctx context.Context, commandID, status, errorCode, errorMessage string, result []byte) error {
 	if commandID == "" {
 		return fmt.Errorf("%w: command id is required", storepkg.ErrInvalidState)
 	}
@@ -243,13 +245,21 @@ func (s *Store) UpdateHostCommand(ctx context.Context, commandID, status, errorC
 	default:
 		return fmt.Errorf("%w: invalid command status %q", storepkg.ErrInvalidState, status)
 	}
+	var resultValue any
+	if len(result) > 0 {
+		if !json.Valid(result) {
+			return fmt.Errorf("%w: command result is not valid JSON", storepkg.ErrInvalidState)
+		}
+		resultValue = json.RawMessage(append([]byte(nil), result...))
+	}
 	return s.withTx(ctx, func(tx pgx.Tx) error {
-		var current, commandType, boxID, runID, runtimeID string
+		var current, commandType, boxID, runID, runtimeID, organizationID, hostID string
 		err := tx.QueryRow(ctx, `
             SELECT status, command_type, COALESCE(box_id::text, ''),
-                   COALESCE(run_id::text, ''), COALESCE(runtime_instance_id::text, '')
+                   COALESCE(run_id::text, ''), COALESCE(runtime_instance_id::text, ''),
+                   organization_id, host_id
             FROM host_commands WHERE id = $1 FOR UPDATE`, commandID).Scan(
-			&current, &commandType, &boxID, &runID, &runtimeID)
+			&current, &commandType, &boxID, &runID, &runtimeID, &organizationID, &hostID)
 		if err != nil {
 			return mapError("lock host command", err)
 		}
@@ -265,28 +275,43 @@ func (s *Store) UpdateHostCommand(ctx context.Context, commandID, status, errorC
                 accepted_at = CASE WHEN $2 = 'accepted' THEN COALESCE(accepted_at, now()) ELSE accepted_at END,
                 started_at = CASE WHEN $2 = 'running' THEN COALESCE(started_at, now()) ELSE started_at END,
                 completed_at = CASE WHEN $2 IN ('completed','failed','cancelled') THEN COALESCE(completed_at, now()) ELSE completed_at END,
-                error_code = NULLIF($3, ''), error_message = NULLIF($4, ''), updated_at = now()
-            WHERE id = $1`, commandID, status, errorCode, errorMessage)
+                error_code = NULLIF($3, ''), error_message = NULLIF($4, ''),
+                result_json = COALESCE($5::jsonb, result_json), updated_at = now()
+            WHERE id = $1`, commandID, status, errorCode, errorMessage, resultValue)
 		if err != nil {
 			return mapError("update host command", err)
 		}
 
-		if commandType == "runtime.approval_response" && (status == "accepted" || status == "running" || status == "completed") {
+		if commandType == "runtime.approval_response" && status == "completed" {
 			if runID != "" {
-				if _, err := tx.Exec(ctx, `
-                    UPDATE runs SET status = 'running', version = version + 1
-                    WHERE id = $1 AND status = 'waiting_approval'`, runID); err != nil {
+				if _, err := tx.Exec(ctx, `UPDATE runs SET status = 'running', version = version + 1 WHERE id = $1 AND status = 'waiting_approval'`, runID); err != nil {
 					return mapError("resume approved run", err)
 				}
 			}
 			if boxID != "" {
-				if _, err := tx.Exec(ctx, `
-                    UPDATE boxes SET status = 'running', updated_at = now(), version = version + 1
-                    WHERE id = $1 AND status = 'waiting_approval'`, boxID); err != nil {
+				if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'running', updated_at = now(), version = version + 1 WHERE id = $1 AND status = 'waiting_approval'`, boxID); err != nil {
 					return mapError("resume approved box", err)
 				}
 			}
 		}
+
+		if commandType == "runtime.stop" && status == "completed" && boxID != "" {
+			if runtimeID != "" {
+				if _, err := tx.Exec(ctx, `
+                    UPDATE runtime_instances SET status = 'exited', stopped_at = COALESCE(stopped_at, now()),
+                        terminal_reason = COALESCE(terminal_reason, 'hibernated'), version = version + 1
+                    WHERE id = $1 AND status = 'stopping'`, runtimeID); err != nil {
+					return mapError("complete hibernated runtime", err)
+				}
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE boxes SET status = 'hibernated', updated_at = now(), version = version + 1
+                WHERE id = $1 AND status = 'hibernating'`, boxID); err != nil {
+				return mapError("complete hibernation", err)
+			}
+		}
+
+		runFailed := false
 		if status == "failed" || status == "cancelled" {
 			switch commandType {
 			case "runtime.start":
@@ -300,46 +325,93 @@ func (s *Store) UpdateHostCommand(ctx context.Context, commandID, status, errorC
 					}
 				}
 				if runID != "" {
-					if _, err := tx.Exec(ctx, `
+					tag, err := tx.Exec(ctx, `
                         UPDATE runs SET status = 'failed', finished_at = now(), terminal_reason = $2,
                             error_code = NULLIF($3,''), error_message = NULLIF($4,''), version = version + 1
                         WHERE id = $1 AND status IN ('dispatching','running')`,
-						runID, "command_"+status, errorCode, errorMessage); err != nil {
+						runID, "command_"+status, errorCode, errorMessage)
+					if err != nil {
 						return mapError("fail start run", err)
 					}
+					runFailed = tag.RowsAffected() > 0
 				}
 				if boxID != "" {
-					if _, err := tx.Exec(ctx, `
-                        UPDATE boxes SET status = 'error', updated_at = now(), version = version + 1
-                        WHERE id = $1 AND status <> 'terminated'`, boxID); err != nil {
+					if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'error', updated_at = now(), version = version + 1 WHERE id = $1 AND status <> 'terminated'`, boxID); err != nil {
 						return mapError("fail start box", err)
 					}
 				}
 			case "runtime.prompt", "runtime.follow_up", "runtime.steer":
 				if runID != "" && commandType != "runtime.steer" {
-					if _, err := tx.Exec(ctx, `
+					tag, err := tx.Exec(ctx, `
                         UPDATE runs SET status = 'failed', finished_at = now(), terminal_reason = $2,
                             error_code = NULLIF($3,''), error_message = NULLIF($4,''), version = version + 1
                         WHERE id = $1 AND status = 'dispatching'`,
-						runID, "command_"+status, errorCode, errorMessage); err != nil {
+						runID, "command_"+status, errorCode, errorMessage)
+					if err != nil {
 						return mapError("fail input run", err)
 					}
+					runFailed = tag.RowsAffected() > 0
 				}
 				if boxID != "" && commandType != "runtime.steer" {
-					if _, err := tx.Exec(ctx, `
-                        UPDATE boxes SET status = 'idle', updated_at = now(), version = version + 1
-                        WHERE id = $1 AND status = 'running'`, boxID); err != nil {
+					if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'idle', updated_at = now(), version = version + 1 WHERE id = $1 AND status = 'running'`, boxID); err != nil {
 						return mapError("release failed input box", err)
 					}
 				}
 			case "runtime.stop":
 				if boxID != "" {
-					if _, err := tx.Exec(ctx, `
-                        UPDATE boxes SET status = 'error', updated_at = now(), version = version + 1
-                        WHERE id = $1 AND status = 'hibernating'`, boxID); err != nil {
+					if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'error', updated_at = now(), version = version + 1 WHERE id = $1 AND status = 'hibernating'`, boxID); err != nil {
 						return mapError("fail hibernation", err)
 					}
 				}
+			}
+		}
+
+		if commandType == "workspace.git_diff" && (status == "completed" || status == "failed" || status == "cancelled") {
+			diffStatus := "failed"
+			if status == "completed" && resultValue != nil {
+				diffStatus = "completed"
+			}
+			diffError := errorMessage
+			if status == "completed" && resultValue == nil {
+				diffError = "host returned no diff result"
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE workspace_diff_requests
+                SET status = $2, result = CASE WHEN $2 = 'completed' THEN $3::jsonb ELSE NULL END,
+                    error_code = NULLIF($4,''), error_message = NULLIF($5,''),
+                    generated_at = now()
+                WHERE command_id = $1 AND status = 'pending'`, commandID, diffStatus,
+				resultValue, errorCode, diffError); err != nil {
+				return mapError("project workspace diff result", err)
+			}
+		}
+
+		if runFailed && boxID != "" && runID != "" {
+			var scheduleID string
+			scanErr := tx.QueryRow(ctx, `
+                UPDATE schedule_executions SET status = 'failed', reason = $2,
+                    finished_at = now(), updated_at = now()
+                WHERE run_id = $1 AND status IN ('claimed','dispatched')
+                RETURNING schedule_id`, runID, "command_"+status).Scan(&scheduleID)
+			if scanErr != nil && !errors.Is(scanErr, pgx.ErrNoRows) {
+				return mapError("fail schedule execution", scanErr)
+			}
+			body := "The agent run failed before it could complete."
+			if errorMessage != "" {
+				body += " " + errorMessage
+			}
+			if err := notifyBoxAudienceTx(ctx, tx, organizationID, boxID,
+				"run_failed", "Run failed", body, "run-terminal:"+runID,
+				runID, scheduleID, ""); err != nil {
+				return err
+			}
+		}
+
+		if status == "completed" || status == "failed" || status == "cancelled" {
+			if err := insertAudit(ctx, tx, organizationID, "daemon", "", hostID,
+				"host_command."+status, "host_command", commandID,
+				map[string]any{"commandType": commandType, "boxId": boxID, "runId": runID, "errorCode": errorCode}); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -713,14 +785,19 @@ func getApproval(ctx context.Context, q querier, id string) (domain.Approval, er
 
 func scanApproval(row scanner) (domain.Approval, error) {
 	var result domain.Approval
-	var payload []byte
+	var payload, decisionPayload []byte
 	err := row.Scan(
 		&result.ID, &result.OrganizationID, &result.BoxID, &result.RunID,
-		&result.ToolName, &result.RiskLevel, &result.Status, &payload, &result.ExpiresAt,
+		&result.ToolName, &result.RiskLevel, &result.Status, &payload,
+		&decisionPayload, &result.RequestedAt, &result.ExpiresAt,
+		&result.ResolvedAt, &result.ResolvedByUserID,
 	)
 	if err != nil {
 		return domain.Approval{}, err
 	}
 	result.Payload = json.RawMessage(append([]byte(nil), payload...))
+	if string(decisionPayload) != "null" {
+		result.DecisionPayload = json.RawMessage(append([]byte(nil), decisionPayload...))
+	}
 	return result, nil
 }

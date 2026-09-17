@@ -1,0 +1,21 @@
+{
+  "serverAddress": "127.0.0.1:9443",
+  "serverTLS": false,
+  "serverName": "",
+  "hostId": "",
+  "enrollmentToken": "replace-me",
+  "stateDirectory": "~/.agentboxd/state",
+  "workspaceRoots": [
+    "/Users/example/projects"
+  ],
+  "ompBinary": "omp",
+  "claudeBinary": "claude",
+  "enableClaude": false,
+  "claudePermissionMode": "dontAsk",
+  "healthAddress": "127.0.0.1:9091",
+  "maxActiveBoxes": 4,
+  "maxRunDuration": "2h",
+  "heartbeatInterval": "15s",
+  "shutdownTimeout": "15s",
+  "runtimeProbeTimeout": "10s"
+}

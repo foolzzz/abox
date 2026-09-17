@@ -10,6 +10,8 @@ import { useResource } from "../hooks/useResource";
 import { roleAtLeast, useAccess } from "../lib/access";
 import { isObjectRecord } from "../lib/data";
 import { compactJson, extractText, formatTime, humanize, initials, messageText, relativeTime } from "../lib/format";
+import { useI18n } from "../lib/i18n";
+import { currentPresentationContext } from "../lib/presentation";
 import { Link } from "../lib/router";
 import { ApprovalCard } from "./ApprovalsView";
 
@@ -49,6 +51,7 @@ interface ActivityItem {
 export function BoxDetailView({ boxId }: { boxId: string }) {
   const { currentUser } = useAccess();
   const { notify } = useToast();
+  const { t } = useI18n();
   const resource = useResource<BoxDetailData>(async (signal) => {
     const [snapshot, messages, approvals, agents, hosts, workspaces, acl] = await Promise.all([
       api.getBox(boxId, signal),
@@ -151,22 +154,29 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
   const canInterrupt = effectiveStatus === "running" || effectiveStatus === "waiting_approval";
   const canStop = !["terminated", "hibernated", "hibernating"].includes(effectiveStatus);
   const canResume = effectiveStatus === "hibernated";
+  const canMessage = canOperateBox && !["hibernated", "hibernating", "terminated"].includes(effectiveStatus);
+  const composerLockTitle = canOperateBox
+    ? effectiveStatus === "hibernated" ? "Hibernated session" : effectiveStatus === "hibernating" ? "Hibernating session" : "Session ended"
+    : "Read-only conversation";
+  const composerLockDescription = canOperateBox
+    ? effectiveStatus === "hibernated" ? "Resume this box to send new work. Existing messages and automation output remain available." : effectiveStatus === "hibernating" ? "Runtime state is being saved. Refresh after hibernation completes to resume the box." : "This terminated box keeps its history and automation output, but cannot accept new work."
+    : `Your ${effectiveAccess} access can view messages and live events, but cannot send or control this box.`;
 
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
     const content = composer.trim();
-    if (!canOperateBox || !content || sending) return;
+    if (!canMessage || !content || sending) return;
     setSending(true);
     setSendError(undefined);
     try {
-      const message = await api.sendMessage(boxId, { content, delivery }, crypto.randomUUID());
+		const message = await api.sendMessage(boxId, { content, delivery, presentationContext: currentPresentationContext() }, crypto.randomUUID());
       resource.setData((current) => {
         if (!current || current.messages.some((candidate) => candidate.id === message.id)) return current;
         return { ...current, messages: [...current.messages, message] };
       });
       setComposer("");
       stickToBottom.current = true;
-      notify(delivery === "prompt" ? "Prompt accepted." : delivery === "steer" ? "Steer accepted." : "Follow-up queued.");
+      notify(delivery === "prompt" ? t("box.promptAccepted") : delivery === "steer" ? t("box.steerAccepted") : t("box.followUpQueued"));
     } catch (requestError) {
       setSendError(errorMessage(requestError));
     } finally {
@@ -189,7 +199,7 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
       if (action === "interrupt") await api.interruptBox(boxId);
       else if (action === "stop") await api.stopBox(boxId);
       else await api.resumeBox(boxId);
-      notify(action === "interrupt" ? "Interrupt requested." : action === "stop" ? "Stop requested." : "Resume requested.");
+      notify(action === "interrupt" ? t("box.interruptRequested") : action === "stop" ? t("box.stopRequested") : t("box.resumeRequested"));
       setConfirmStop(false);
       window.setTimeout(resource.reload, 500);
     } catch (requestError) {
@@ -203,27 +213,36 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
     <div className="box-console">
       <header className="box-console__header">
         <div className="box-console__identity">
-          <Link className="back-link" to="/boxes">Boxes</Link><span>/</span>
-          <div><span className="resource-icon resource-icon--box"><Icon name="box" /></span><div><h1>{snapshot.name}</h1><p>{agent?.name ?? "Unknown agent"} · {workspace?.name ?? "Unknown workspace"}</p></div></div>
+          <Link className="back-link" to="/boxes">{t("box.back")}</Link><span>/</span>
+          <div><span className="resource-icon resource-icon--box"><Icon name="box" /></span><div><h1>{snapshot.name}</h1><p>{agent?.name ?? t("box.unknownAgent")} · {workspace?.name ?? t("box.unknownWorkspace")}</p></div></div>
         </div>
         <div className="box-console__controls">
           <StatusChip status={effectiveStatus} />
-          <Button icon="share" onClick={() => setSharingOpen(true)}>Sharing</Button>
-          {canOperateBox && canInterrupt ? <Button icon="interrupt" busy={controlAction === "interrupt"} disabled={Boolean(controlAction)} onClick={() => void control("interrupt")}>Interrupt</Button> : null}
-          {canOperateBox && canResume ? <Button icon="resume" variant="primary" busy={controlAction === "resume"} disabled={Boolean(controlAction)} onClick={() => void control("resume")}>Resume</Button> : null}
-          {canOperateBox && canStop ? <Button icon="stop" variant="danger" disabled={Boolean(controlAction)} onClick={() => setConfirmStop(true)}>Stop</Button> : null}
+          <Button icon="share" onClick={() => setSharingOpen(true)}>{t("box.sharing")}</Button>
+          {canOperateBox && canInterrupt ? <Button icon="interrupt" busy={controlAction === "interrupt"} disabled={Boolean(controlAction)} onClick={() => void control("interrupt")}>{t("box.interrupt")}</Button> : null}
+          {canOperateBox && canResume ? <Button icon="resume" variant="primary" busy={controlAction === "resume"} disabled={Boolean(controlAction)} onClick={() => void control("resume")}>{t("box.resume")}</Button> : null}
+          {canOperateBox && canStop ? <Button icon="stop" variant="danger" disabled={Boolean(controlAction)} onClick={() => setConfirmStop(true)}>{t("box.stop")}</Button> : null}
         </div>
       </header>
+      <nav className="box-panel-nav box-panel-nav--console" aria-label={t("shell.boxOutput")}>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/subagents`}><Icon name="agent" /><span>{t("box.subagents")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/todos`}><Icon name="todo" /><span>{t("box.todos")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/artifacts`}><Icon name="artifact" /><span>{t("box.artifacts")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/diff`}><Icon name="diff" /><span>{t("box.diff")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/terminal`}><Icon name="terminal" /><span>{t("box.terminal")}</span></Link>
+      </nav>
       {resource.error ? <InlineAlert tone="warning">The latest snapshot could not be loaded. Live events remain connected.</InlineAlert> : null}
       {controlError ? <InlineAlert>{controlError}</InlineAlert> : null}
+      {effectiveStatus === "hibernated" ? <InlineAlert tone="warning">This box is hibernated. Its conversation and output remain available; resume it before sending new work.</InlineAlert> : null}
+      {effectiveStatus === "hibernating" ? <InlineAlert tone="warning">This box is saving runtime state before hibernation. Controls will return when the transition completes.</InlineAlert> : null}
 
       <div className="console-layout">
-        <section className="conversation-panel" aria-label="Conversation">
+        <section className="conversation-panel" aria-label={t("box.conversation")}>
           <div className="conversation-panel__header">
-            <div><p className="eyebrow">Conversation</p><h2>Agent thread</h2></div>
-            <div className="stream-indicator" title={streamError}><span className={cx("stream-indicator__dot", `stream-indicator__dot--${streamState}`)} />{streamState === "open" ? "Live" : streamState === "retrying" ? `Reconnecting${streamAttempt ? ` · ${streamAttempt}` : ""}` : humanize(streamState)}</div>
+            <div><p className="eyebrow">{t("box.conversation")}</p><h2>{t("box.thread")}</h2></div>
+            <div className="stream-indicator" title={streamError}><span className={cx("stream-indicator__dot", `stream-indicator__dot--${streamState}`)} />{streamState === "open" ? t("box.live") : streamState === "retrying" ? `${t("box.reconnecting")}${streamAttempt ? ` · ${streamAttempt}` : ""}` : humanize(streamState)}</div>
           </div>
-          {streamError && streamState === "retrying" ? <div className="stream-warning" role="status">Live updates paused: {streamError}. Retrying automatically.</div> : null}
+          {streamError && streamState === "retrying" ? <div className="stream-warning" role="status">{t("box.reconnecting")}: {streamError}</div> : null}
           <div
             className="message-list"
             ref={conversationRef}
@@ -233,7 +252,7 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
             }}
           >
             {data.messages.length === 0 && liveMessages.length === 0 ? (
-              <EmptyState icon="spark" title={canOperateBox ? "Start the conversation" : "No messages yet"} description={canOperateBox ? "Send a prompt to begin a run in this box." : "Your access is read-only. An owner or operator can start the conversation."} />
+              <EmptyState icon="spark" title={t(canMessage ? "box.start" : "box.noMessages")} description={t(canMessage ? "box.startHint" : "box.historyHint")} />
             ) : (
               <>
                 {data.messages.map((message) => <MessageBubble message={message} agentName={agent?.name} currentUserId={currentUser?.id} canCancel={canOperateBox} key={message.id} onCancelled={(cancelled) => resource.setData((current) => current ? { ...current, messages: current.messages.map((candidate) => candidate.id === cancelled.id ? cancelled : candidate) } : current)} />)}
@@ -241,50 +260,50 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
               </>
             )}
           </div>
-          {canOperateBox ? (
+          {canMessage ? (
             <form className="composer" onSubmit={send}>
               <fieldset className="delivery-selector">
-                <legend className="sr-only">Delivery mode</legend>
+                <legend className="sr-only">{t("box.delivery")}</legend>
                 {(["prompt", "steer", "follow_up"] as DeliveryMode[]).map((mode) => (
                   <label className={cx(delivery === mode && "delivery-selector__option--active")} key={mode}>
                     <input type="radio" name="delivery" value={mode} checked={delivery === mode} onChange={() => setDelivery(mode)} />
-                    {mode === "follow_up" ? "Follow-up" : humanize(mode)}
+                    {t(mode === "follow_up" ? "box.followUp" : mode === "steer" ? "box.steer" : "box.prompt")}
                   </label>
                 ))}
               </fieldset>
               <div className="composer__input">
-                <textarea aria-label="Message" rows={3} value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={handleComposerKey} placeholder={delivery === "prompt" ? "Give the agent a task…" : delivery === "steer" ? "Redirect the active run…" : "Queue work after the active run…"} />
-                <Button type="submit" variant="primary" icon="send" busy={sending} disabled={!composer.trim()} aria-label="Send message">Send</Button>
+                <textarea aria-label={t("box.send")} rows={3} value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={handleComposerKey} placeholder={t(delivery === "prompt" ? "box.promptPlaceholder" : delivery === "steer" ? "box.steerPlaceholder" : "box.followUpPlaceholder")} />
+                <Button type="submit" variant="primary" icon="send" busy={sending} disabled={!composer.trim()} aria-label={t("box.send")}>{t("box.send")}</Button>
               </div>
-              <div className="composer__footer"><span>{delivery === "prompt" ? "Starts a new run when idle." : delivery === "steer" ? "Adjusts the active run immediately." : "Runs after the current turn completes."}</span><span><kbd>⌘</kbd><span>+</span><kbd>Enter</kbd> to send</span></div>
+              <div className="composer__footer"><span>{t(delivery === "prompt" ? "box.promptHint" : delivery === "steer" ? "box.steerHint" : "box.followUpHint")}</span><span><kbd>⌘</kbd><span>+</span><kbd>Enter</kbd> {t("box.toSend")}</span></div>
               {sendError ? <InlineAlert>{sendError}</InlineAlert> : null}
             </form>
-          ) : <div className="composer composer--read-only"><Icon name="approval" /><div><strong>Read-only conversation</strong><span>Your {effectiveAccess} access can view messages and live events, but cannot send or control this box.</span></div></div>}
+          ) : <div className="composer composer--read-only"><Icon name={canOperateBox ? "clock" : "approval"} /><div><strong>{composerLockTitle}</strong><span>{composerLockDescription}</span></div></div>}
         </section>
 
         <aside className="console-sidebar" aria-label="Session context">
           <section className="session-card">
-            <div className="panel__header"><div><p className="eyebrow">Runtime</p><h2>Session</h2></div><Icon name="activity" /></div>
+            <div className="panel__header"><div><p className="eyebrow">{t("box.runtime")}</p><h2>{t("box.session")}</h2></div><Icon name="activity" /></div>
             <dl className="session-facts">
-              <div><dt>Run</dt><dd className="mono" title={effectiveRunId ?? undefined}>{effectiveRunId ? effectiveRunId.slice(0, 8) : "Idle"}</dd></div>
-              <div><dt>Runtime</dt><dd>{(snapshot.runtimeType ?? agent?.runtimeType ?? "—").toUpperCase()}</dd></div>
-              <div><dt>Host</dt><dd><span className={cx("mini-dot", host?.status === "online" && "mini-dot--online")} />{host?.name ?? "Unknown"}</dd></div>
-              <div><dt>Workspace</dt><dd title={workspace?.path}>{workspace?.name ?? "Unknown"}</dd></div>
-              <div><dt>Access</dt><dd>{effectiveAccess}</dd></div>
-              <div><dt>Event cursor</dt><dd className="mono">#{Math.max(snapshot.lastEventSeq, events.at(-1)?.seq ?? 0)}</dd></div>
+              <div><dt>{t("box.run")}</dt><dd className="mono" title={effectiveRunId ?? undefined}>{effectiveRunId ? effectiveRunId.slice(0, 8) : t("common.idle")}</dd></div>
+              <div><dt>{t("box.runtime")}</dt><dd>{(snapshot.runtimeType ?? agent?.runtimeType ?? "—").toUpperCase()}</dd></div>
+              <div><dt>{t("box.host")}</dt><dd><span className={cx("mini-dot", host?.status === "online" && "mini-dot--online")} />{host?.name ?? t("common.unknown")}</dd></div>
+              <div><dt>{t("box.workspace")}</dt><dd title={workspace?.path}>{workspace?.name ?? t("common.unknown")}</dd></div>
+              <div><dt>{t("box.access")}</dt><dd>{effectiveAccess}</dd></div>
+              <div><dt>{t("box.eventCursor")}</dt><dd className="mono">#{Math.max(snapshot.lastEventSeq, events.at(-1)?.seq ?? 0)}</dd></div>
             </dl>
           </section>
 
           {pendingApprovals.length ? (
             <section className="sidebar-section">
-              <div className="panel__header"><div><p className="eyebrow">Decision needed</p><h2>Pending approval</h2></div><span className="nav-badge">{pendingApprovals.length}</span></div>
+              <div className="panel__header"><div><p className="eyebrow">{t("box.decisionNeeded")}</p><h2>{t("box.pendingApproval")}</h2></div><span className="nav-badge">{pendingApprovals.length}</span></div>
               {pendingApprovals.map((approval) => <ApprovalCard approval={approval} compact canDecide={canOperateBox} key={approval.id} onResolved={(resolved) => resource.setData((current) => current ? { ...current, approvals: current.approvals.map((item) => item.id === resolved.id ? resolved : item) } : current)} />)}
             </section>
           ) : null}
 
           <section className="activity-panel">
-            <div className="panel__header"><div><p className="eyebrow">Live trace</p><h2>Activity</h2></div><span className="event-count">{activity.length}</span></div>
-            {activity.length ? <ActivityTimeline items={activity} /> : <div className="activity-empty"><Icon name="terminal" /><p>No tool activity yet.</p><small>Runtime events will appear as the agent works.</small></div>}
+            <div className="panel__header"><div><p className="eyebrow">{t("box.liveTrace")}</p><h2>{t("box.activity")}</h2></div><span className="event-count">{activity.length}</span></div>
+            {activity.length ? <ActivityTimeline items={activity} /> : <div className="activity-empty"><Icon name="terminal" /><p>{t("box.noActivity")}</p><small>{t("box.activityHint")}</small></div>}
           </section>
         </aside>
       </div>

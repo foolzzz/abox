@@ -124,21 +124,34 @@ type Run struct {
 	ErrorMessage      string     `json:"errorMessage,omitempty"`
 }
 
+type PresentationContext struct {
+	ViewportWidth        int    `json:"viewportWidth,omitempty"`
+	ViewportHeight       int    `json:"viewportHeight,omitempty"`
+	DeviceClass          string `json:"deviceClass,omitempty"`
+	Orientation          string `json:"orientation,omitempty"`
+	Touch                bool   `json:"touch"`
+	Locale               string `json:"locale,omitempty"`
+	Timezone             string `json:"timezone,omitempty"`
+	PrefersReducedMotion bool   `json:"prefersReducedMotion"`
+	Surface              string `json:"surface,omitempty"`
+}
+
 type Message struct {
-	ID             string          `json:"id"`
-	OrganizationID string          `json:"organizationId"`
-	BoxID          string          `json:"boxId"`
-	RunID          string          `json:"runId,omitempty"`
-	BoxSeq         int64           `json:"boxSeq"`
-	AuthorType     string          `json:"authorType"`
-	AuthorUserID   string          `json:"authorUserId,omitempty"`
-	AuthorName     string          `json:"authorName,omitempty"`
-	Role           string          `json:"role"`
-	Delivery       Delivery        `json:"delivery,omitempty"`
-	Status         string          `json:"status"`
-	Content        json.RawMessage `json:"content"`
-	PlainText      string          `json:"plainText,omitempty"`
-	CreatedAt      time.Time       `json:"createdAt"`
+	ID                  string          `json:"id"`
+	OrganizationID      string          `json:"organizationId"`
+	BoxID               string          `json:"boxId"`
+	RunID               string          `json:"runId,omitempty"`
+	BoxSeq              int64           `json:"boxSeq"`
+	AuthorType          string          `json:"authorType"`
+	AuthorUserID        string          `json:"authorUserId,omitempty"`
+	AuthorName          string          `json:"authorName,omitempty"`
+	Role                string          `json:"role"`
+	Delivery            Delivery        `json:"delivery,omitempty"`
+	Status              string          `json:"status"`
+	Content             json.RawMessage `json:"content"`
+	PlainText           string          `json:"plainText,omitempty"`
+	PresentationContext json.RawMessage `json:"presentationContext,omitempty"`
+	CreatedAt           time.Time       `json:"createdAt"`
 }
 
 type BoxEvent struct {
@@ -173,15 +186,19 @@ type HostCommand struct {
 }
 
 type Approval struct {
-	ID             string          `json:"id"`
-	OrganizationID string          `json:"organizationId"`
-	BoxID          string          `json:"boxId"`
-	RunID          string          `json:"runId"`
-	ToolName       string          `json:"toolName"`
-	RiskLevel      string          `json:"riskLevel"`
-	Status         string          `json:"status"`
-	Payload        json.RawMessage `json:"payload"`
-	ExpiresAt      time.Time       `json:"expiresAt"`
+	ID               string          `json:"id"`
+	OrganizationID   string          `json:"organizationId"`
+	BoxID            string          `json:"boxId"`
+	RunID            string          `json:"runId"`
+	ToolName         string          `json:"toolName"`
+	RiskLevel        string          `json:"riskLevel"`
+	Status           string          `json:"status"`
+	Payload          json.RawMessage `json:"payload"`
+	DecisionPayload  json.RawMessage `json:"decisionPayload,omitempty"`
+	RequestedAt      time.Time       `json:"requestedAt"`
+	ExpiresAt        time.Time       `json:"expiresAt"`
+	ResolvedAt       *time.Time      `json:"resolvedAt,omitempty"`
+	ResolvedByUserID string          `json:"resolvedByUserId,omitempty"`
 }
 
 type CreateAgentInput struct {
@@ -206,7 +223,153 @@ type CreateBoxInput struct {
 }
 
 type SendMessageInput struct {
-	Content        string
-	Delivery       Delivery
-	IdempotencyKey string
+	Content             string
+	Delivery            Delivery
+	PresentationContext PresentationContext
+	IdempotencyKey      string
+}
+
+type Schedule struct {
+	ID                string     `json:"id"`
+	OrganizationID    string     `json:"organizationId"`
+	Name              string     `json:"name"`
+	AgentID           string     `json:"agentId"`
+	AgentVersionID    string     `json:"agentVersionId,omitempty"`
+	HostID            string     `json:"hostId"`
+	WorkspaceID       string     `json:"workspaceId"`
+	CronExpression    string     `json:"cronExpression"`
+	Timezone          string     `json:"timezone"`
+	PromptTemplate    string     `json:"promptTemplate"`
+	ConcurrencyPolicy string     `json:"concurrencyPolicy"`
+	Status            string     `json:"status"`
+	NextRunAt         *time.Time `json:"nextRunAt,omitempty"`
+	LastRunAt         *time.Time `json:"lastRunAt,omitempty"`
+	CreatedByUserID   string     `json:"createdByUserId,omitempty"`
+	Version           int64      `json:"version"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	UpdatedAt         time.Time  `json:"updatedAt"`
+}
+
+type CreateScheduleInput struct {
+	Name              string
+	AgentID           string
+	HostID            string
+	WorkspaceID       string
+	CronExpression    string
+	Timezone          string
+	PromptTemplate    string
+	ConcurrencyPolicy string
+	Status            string
+}
+
+type UpdateScheduleInput struct {
+	Name              *string
+	AgentID           *string
+	HostID            *string
+	WorkspaceID       *string
+	CronExpression    *string
+	Timezone          *string
+	PromptTemplate    *string
+	ConcurrencyPolicy *string
+	Status            *string
+}
+
+type ScheduleExecution struct {
+	ID             string     `json:"id"`
+	OrganizationID string     `json:"organizationId"`
+	ScheduleID     string     `json:"scheduleId"`
+	ScheduledFor   time.Time  `json:"scheduledFor"`
+	BoxID          string     `json:"boxId,omitempty"`
+	RunID          string     `json:"runId,omitempty"`
+	Status         string     `json:"status"`
+	Reason         string     `json:"reason,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
+}
+
+type Notification struct {
+	ID             string     `json:"id"`
+	OrganizationID string     `json:"organizationId"`
+	UserID         string     `json:"userId,omitempty"`
+	Type           string     `json:"type"`
+	Title          string     `json:"title"`
+	Body           string     `json:"body"`
+	Status         string     `json:"status"`
+	BoxID          string     `json:"boxId,omitempty"`
+	RunID          string     `json:"runId,omitempty"`
+	ScheduleID     string     `json:"scheduleId,omitempty"`
+	ApprovalID     string     `json:"approvalId,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	ReadAt         *time.Time `json:"readAt,omitempty"`
+}
+
+type SubagentInstance struct {
+	ID                    string          `json:"id"`
+	BoxID                 string          `json:"boxId"`
+	RunID                 string          `json:"runId"`
+	RuntimeInstanceID     string          `json:"runtimeInstanceId"`
+	ExternalAgentID       string          `json:"externalAgentId"`
+	ParentExternalAgentID string          `json:"parentExternalAgentId,omitempty"`
+	AgentType             string          `json:"agentType,omitempty"`
+	Label                 string          `json:"label,omitempty"`
+	Status                string          `json:"status"`
+	SessionRef            string          `json:"sessionRef,omitempty"`
+	Metadata              json.RawMessage `json:"metadata"`
+	StartedAt             time.Time       `json:"startedAt"`
+	FinishedAt            *time.Time      `json:"finishedAt,omitempty"`
+}
+
+type TodoItem struct {
+	ID                string     `json:"id"`
+	BoxID             string     `json:"boxId"`
+	RunID             string     `json:"runId,omitempty"`
+	RuntimeInstanceID string     `json:"runtimeInstanceId"`
+	ExternalTodoID    string     `json:"externalTodoId"`
+	PhaseName         string     `json:"phaseName,omitempty"`
+	Content           string     `json:"content"`
+	Position          int        `json:"position"`
+	Status            string     `json:"status"`
+	BlockReason       string     `json:"blockReason,omitempty"`
+	UpdatedAt         time.Time  `json:"updatedAt"`
+	CompletedAt       *time.Time `json:"completedAt,omitempty"`
+}
+
+type Artifact struct {
+	ID             string          `json:"id"`
+	OrganizationID string          `json:"organizationId,omitempty"`
+	BoxID          string          `json:"boxId"`
+	RunID          string          `json:"runId,omitempty"`
+	HostID         string          `json:"hostId,omitempty"`
+	Kind           string          `json:"kind"`
+	Name           string          `json:"name"`
+	MIMEType       string          `json:"mimeType,omitempty"`
+	SizeBytes      int64           `json:"sizeBytes"`
+	SHA256         string          `json:"sha256"`
+	Status         string          `json:"status"`
+	Metadata       json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	ExpiresAt      *time.Time      `json:"expiresAt,omitempty"`
+	DownloadURL    string          `json:"downloadUrl"`
+	HostPath       string          `json:"-"`
+	WorkspacePath  string          `json:"-"`
+}
+
+type WorkspaceDiffFile struct {
+	Path      string `json:"path"`
+	Status    string `json:"status"`
+	OldPath   string `json:"oldPath,omitempty"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Patch     string `json:"patch,omitempty"`
+}
+
+type WorkspaceDiff struct {
+	RequestID   string              `json:"requestId,omitempty"`
+	Status      string              `json:"status,omitempty"`
+	BaseRef     string              `json:"baseRef,omitempty"`
+	HeadRef     string              `json:"headRef,omitempty"`
+	GeneratedAt *time.Time          `json:"generatedAt,omitempty"`
+	Files       []WorkspaceDiffFile `json:"files,omitempty"`
+	Error       string              `json:"error,omitempty"`
 }

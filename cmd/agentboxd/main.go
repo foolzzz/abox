@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,14 +16,16 @@ var version = "dev"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	if err := run(); err != nil {
+	configPath := flag.String("config", "", "path to agentboxd JSON configuration")
+	flag.Parse()
+	if err := run(*configPath); err != nil {
 		logger.Error("agentboxd stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	config, err := daemon.LoadConfig()
+func run(configPath string) error {
+	config, err := daemon.LoadConfig(configPath)
 	if err != nil {
 		return err
 	}

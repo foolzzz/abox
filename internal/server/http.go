@@ -241,8 +241,11 @@ func (s *Server) handleCreateAgent(writer http.ResponseWriter, request *http.Req
 		writeProblem(writer, http.StatusBadRequest, "invalid_request", "name and systemPrompt are required")
 		return
 	}
-	if body.RuntimeType != "omp" && body.RuntimeType != "claude" && body.RuntimeType != "acp" {
-		writeProblem(writer, http.StatusBadRequest, "invalid_request", "runtimeType must be omp, claude, or acp")
+	if body.RuntimeType == "" {
+		body.RuntimeType = "omp"
+	}
+	if body.RuntimeType != "omp" && !(body.RuntimeType == "claude" && s.enableClaude) {
+		writeProblem(writer, http.StatusBadRequest, "runtime_disabled", "the first release supports OMP; Claude requires enableClaude=true")
 		return
 	}
 	user, _ := requestUser(request)
@@ -406,8 +409,9 @@ func (s *Server) handleSendMessage(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	var body struct {
-		Content  string          `json:"content"`
-		Delivery domain.Delivery `json:"delivery"`
+		Content             string                     `json:"content"`
+		Delivery            domain.Delivery            `json:"delivery"`
+		PresentationContext domain.PresentationContext `json:"presentationContext"`
 	}
 	if err := decodeJSON(request, &body); err != nil {
 		writeProblem(writer, http.StatusBadRequest, "invalid_request", err.Error())
@@ -421,11 +425,16 @@ func (s *Server) handleSendMessage(writer http.ResponseWriter, request *http.Req
 		writeProblem(writer, http.StatusBadRequest, "invalid_request", "delivery must be prompt, steer, or follow_up")
 		return
 	}
+	if err := validatePresentationContext(body.PresentationContext); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_presentation_context", err.Error())
+		return
+	}
 	user, _ := requestUser(request)
 	message, _, command, err := s.store.SendMessage(request.Context(), user, chi.URLParam(request, "boxID"), domain.SendMessageInput{
-		Content:        body.Content,
-		Delivery:       body.Delivery,
-		IdempotencyKey: idempotencyKey,
+		Content:             body.Content,
+		Delivery:            body.Delivery,
+		PresentationContext: body.PresentationContext,
+		IdempotencyKey:      idempotencyKey,
 	})
 	if err != nil {
 		s.writeStoreError(writer, "send message", err)
@@ -450,31 +459,49 @@ func (s *Server) handleCancelQueuedMessage(writer http.ResponseWriter, request *
 }
 
 type messageResponse struct {
-	ID         string          `json:"id"`
-	BoxID      string          `json:"boxId"`
-	RunID      string          `json:"runId,omitempty"`
-	BoxSeq     int64           `json:"boxSeq"`
-	AuthorName string          `json:"authorName,omitempty"`
-	Role       string          `json:"role"`
-	Delivery   domain.Delivery `json:"delivery,omitempty"`
-	Status     string          `json:"status"`
-	Content    string          `json:"content"`
-	CreatedAt  time.Time       `json:"createdAt"`
+	ID                  string          `json:"id"`
+	BoxID               string          `json:"boxId"`
+	RunID               string          `json:"runId,omitempty"`
+	BoxSeq              int64           `json:"boxSeq"`
+	AuthorName          string          `json:"authorName,omitempty"`
+	Role                string          `json:"role"`
+	Delivery            domain.Delivery `json:"delivery,omitempty"`
+	Status              string          `json:"status"`
+	Content             string          `json:"content"`
+	PresentationContext json.RawMessage `json:"presentationContext,omitempty"`
+	CreatedAt           time.Time       `json:"createdAt"`
 }
 
 func toMessageResponse(message domain.Message) messageResponse {
 	return messageResponse{
-		ID:         message.ID,
-		BoxID:      message.BoxID,
-		RunID:      message.RunID,
-		BoxSeq:     message.BoxSeq,
-		AuthorName: message.AuthorName,
-		Role:       message.Role,
-		Delivery:   message.Delivery,
-		Status:     message.Status,
-		Content:    message.PlainText,
-		CreatedAt:  message.CreatedAt,
+		ID:                  message.ID,
+		BoxID:               message.BoxID,
+		RunID:               message.RunID,
+		BoxSeq:              message.BoxSeq,
+		AuthorName:          message.AuthorName,
+		Role:                message.Role,
+		Delivery:            message.Delivery,
+		Status:              message.Status,
+		Content:             message.PlainText,
+		PresentationContext: message.PresentationContext,
+		CreatedAt:           message.CreatedAt,
 	}
+}
+
+func validatePresentationContext(value domain.PresentationContext) error {
+	if value.ViewportWidth < 0 || value.ViewportWidth > 20000 || value.ViewportHeight < 0 || value.ViewportHeight > 20000 {
+		return errors.New("viewport dimensions must be between 0 and 20000")
+	}
+	if value.DeviceClass != "" && value.DeviceClass != "mobile" && value.DeviceClass != "tablet" && value.DeviceClass != "desktop" {
+		return errors.New("deviceClass must be mobile, tablet, or desktop")
+	}
+	if value.Orientation != "" && value.Orientation != "portrait" && value.Orientation != "landscape" {
+		return errors.New("orientation must be portrait or landscape")
+	}
+	if len(value.Locale) > 64 || len(value.Timezone) > 128 || len(value.Surface) > 64 {
+		return errors.New("locale, timezone, or surface is too long")
+	}
+	return nil
 }
 
 func (s *Server) handleInterrupt(writer http.ResponseWriter, request *http.Request) {
@@ -514,10 +541,22 @@ func (s *Server) handleResume(writer http.ResponseWriter, request *http.Request)
 		s.writeStoreError(writer, "get agent for resume", err)
 		return
 	}
+	approvalMode := ""
+	var approvalPolicy struct {
+		Mode string `json:"mode"`
+	}
+	if len(agent.ApprovalPolicy) > 0 {
+		_ = json.Unmarshal(agent.ApprovalPolicy, &approvalPolicy)
+		approvalMode = strings.TrimSpace(approvalPolicy.Mode)
+	}
+	if approvalMode == "" && box.RuntimeType == "omp" {
+		approvalMode = "always-ask"
+	}
 	payload, err := json.Marshal(map[string]any{
-		"runtime":   box.RuntimeType,
-		"workspace": workspace.Path,
-		"model":     agent.Model,
+		"runtime":      box.RuntimeType,
+		"workspace":    workspace.Path,
+		"model":        agent.Model,
+		"approvalMode": approvalMode,
 	})
 	if err != nil {
 		s.logError("encode resume command", err, "box_id", box.ID)

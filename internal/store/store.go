@@ -38,6 +38,7 @@ type Store interface {
 	SetBoxStatus(ctx context.Context, boxID string, from []domain.BoxStatus, to domain.BoxStatus) error
 	ListBoxACL(ctx context.Context, user domain.User, boxID string) ([]domain.ResourceACL, error)
 	ReplaceBoxACL(ctx context.Context, user domain.User, boxID string, entries []domain.ResourceACLEntryInput) ([]domain.ResourceACL, error)
+	AuthorizeBoxOperation(ctx context.Context, user domain.User, boxID string) error
 
 	ListMessages(ctx context.Context, user domain.User, boxID string, limit int) ([]domain.Message, error)
 	SendMessage(ctx context.Context, user domain.User, boxID string, input domain.SendMessageInput) (domain.Message, *domain.Run, *domain.HostCommand, error)
@@ -51,10 +52,29 @@ type Store interface {
 
 	CreateHostCommand(ctx context.Context, user domain.User, command domain.HostCommand) (domain.HostCommand, error)
 	PendingHostCommands(ctx context.Context, hostID string, limit int) ([]domain.HostCommand, error)
-	UpdateHostCommand(ctx context.Context, commandID, status, errorCode, errorMessage string) error
+	UpdateHostCommand(ctx context.Context, commandID, status, errorCode, errorMessage string, result []byte) error
 
 	ListApprovals(ctx context.Context, user domain.User) ([]domain.Approval, error)
 	ResolveApproval(ctx context.Context, user domain.User, approvalID, decision string) (domain.Approval, *domain.HostCommand, error)
 	ExpireApprovals(ctx context.Context, limit int) ([]domain.HostCommand, error)
 	HibernateIdleBoxes(ctx context.Context, limit int) ([]domain.HostCommand, error)
+
+	ListSchedules(ctx context.Context, user domain.User) ([]domain.Schedule, error)
+	CreateSchedule(ctx context.Context, user domain.User, input domain.CreateScheduleInput) (domain.Schedule, error)
+	UpdateSchedule(ctx context.Context, user domain.User, scheduleID string, input domain.UpdateScheduleInput) (domain.Schedule, error)
+	DeleteSchedule(ctx context.Context, user domain.User, scheduleID string) error
+	ListScheduleExecutions(ctx context.Context, user domain.User, scheduleID string, limit int) ([]domain.ScheduleExecution, error)
+	TriggerScheduleWebhook(ctx context.Context, scheduleID, idempotencyKey, bodySHA256 string) (domain.ScheduleExecution, []domain.HostCommand, error)
+	ProcessDueSchedules(ctx context.Context, limit int) ([]domain.HostCommand, error)
+	DispatchAutomationRuns(ctx context.Context, limit int) ([]domain.HostCommand, error)
+
+	ListNotifications(ctx context.Context, user domain.User, limit int) ([]domain.Notification, error)
+	MarkNotificationRead(ctx context.Context, user domain.User, notificationID string) error
+	MarkAllNotificationsRead(ctx context.Context, user domain.User) error
+
+	ListSubagents(ctx context.Context, user domain.User, boxID string) ([]domain.SubagentInstance, error)
+	ListTodos(ctx context.Context, user domain.User, boxID string) ([]domain.TodoItem, error)
+	ListArtifacts(ctx context.Context, user domain.User, boxID string) ([]domain.Artifact, error)
+	GetArtifactForDownload(ctx context.Context, user domain.User, boxID, artifactID string) (domain.Artifact, error)
+	RequestWorkspaceDiff(ctx context.Context, user domain.User, boxID, baseRef, headRef string) (domain.WorkspaceDiff, *domain.HostCommand, error)
 }

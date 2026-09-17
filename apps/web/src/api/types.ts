@@ -40,6 +40,7 @@ export interface Meta {
   serverVersion: string;
   apiVersion: string;
   minDaemonVersion?: string;
+  enabledRuntimes: RuntimeType[];
   currentUser: CurrentUser;
 }
 
@@ -176,6 +177,18 @@ export interface Run {
   errorMessage?: string;
 }
 
+export interface PresentationContext {
+  viewportWidth: number;
+  viewportHeight: number;
+  deviceClass: "mobile" | "tablet" | "desktop";
+  orientation: "portrait" | "landscape";
+  touch: boolean;
+  locale: string;
+  timezone: string;
+  prefersReducedMotion: boolean;
+  surface: string;
+}
+
 export interface Message {
   id: string;
   boxId: string;
@@ -189,12 +202,14 @@ export interface Message {
   status: string;
   content: unknown;
   plainText?: string;
+  presentationContext?: PresentationContext;
   createdAt: string;
 }
 
 export interface SendMessageRequest {
   content: string;
   delivery: DeliveryMode;
+  presentationContext: PresentationContext;
 }
 
 export interface Approval {
@@ -206,6 +221,138 @@ export interface Approval {
   status: ApprovalStatus;
   payload?: Record<string, unknown>;
   expiresAt: string;
+  requestedAt?: string;
+  resolvedAt?: string | null;
+  resolvedByUserId?: string | null;
+  decisionPayload?: Record<string, unknown> | null;
+}
+
+export type ScheduleStatus = "active" | "paused" | "deleted";
+export type ConcurrencyPolicy = "skip" | "queue" | "replace";
+
+export interface Schedule {
+  id: string;
+  name: string;
+  agentId: string;
+  hostId: string;
+  workspaceId: string;
+  cronExpression: string;
+  timezone: string;
+  promptTemplate: string;
+  concurrencyPolicy: ConcurrencyPolicy;
+  status: ScheduleStatus;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+  createdByUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateScheduleRequest {
+  name: string;
+  agentId: string;
+  hostId: string;
+  workspaceId: string;
+  cronExpression: string;
+  timezone: string;
+  promptTemplate: string;
+  concurrencyPolicy: ConcurrencyPolicy;
+  status: Exclude<ScheduleStatus, "deleted">;
+}
+
+export type UpdateScheduleRequest = Partial<CreateScheduleRequest>;
+
+export interface ScheduleExecution {
+  id: string;
+  scheduleId: string;
+  scheduledFor: string;
+  boxId?: string | null;
+  runId?: string | null;
+  status: "claimed" | "skipped" | "dispatched" | "completed" | "failed";
+  reason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  status: "unread" | "read";
+  boxId?: string | null;
+  runId?: string | null;
+  scheduleId?: string | null;
+  approvalId?: string | null;
+  createdAt: string;
+  readAt?: string | null;
+}
+
+export interface SubagentInstance {
+  id: string;
+  boxId: string;
+  runId: string;
+  runtimeInstanceId: string;
+  externalAgentId: string;
+  parentExternalAgentId?: string | null;
+  agentType?: string | null;
+  label?: string | null;
+  status: "running" | "idle" | "completed" | "failed" | "cancelled" | "parked";
+  sessionRef?: string | null;
+  metadata?: Record<string, unknown>;
+  startedAt: string;
+  finishedAt?: string | null;
+}
+
+export interface TodoItem {
+  id: string;
+  boxId: string;
+  runId?: string | null;
+  runtimeInstanceId: string;
+  externalTodoId: string;
+  phaseName?: string | null;
+  content: string;
+  position: number;
+  status: "pending" | "in_progress" | "completed" | "blocked" | "abandoned";
+  blockReason?: string | null;
+  updatedAt: string;
+}
+
+export interface Artifact {
+  id: string;
+  boxId: string;
+  runId?: string | null;
+  kind: "file" | "image" | "report" | "archive" | "log" | "other";
+  name: string;
+  mimeType?: string | null;
+  sizeBytes: number;
+  sha256: string;
+  status: "ready" | "deleted";
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  expiresAt?: string | null;
+  downloadUrl?: string;
+}
+
+export interface WorkspaceDiffFile {
+  path: string;
+  oldPath?: string | null;
+  status: "added" | "modified" | "deleted" | "renamed" | "untracked";
+  additions: number;
+  deletions: number;
+  patch?: string | null;
+}
+
+export interface WorkspaceDiff {
+  baseRef?: string | null;
+  headRef?: string | null;
+  generatedAt: string;
+  files: WorkspaceDiffFile[];
+}
+
+export interface PendingWorkspaceDiff {
+  status: "pending";
+  requestId: string;
 }
 
 export interface ApprovalDecisionRequest {

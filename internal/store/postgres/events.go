@@ -267,6 +267,17 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
             WHERE id = $1 AND status IN ('starting','ready','busy')`, event.RuntimeInstanceID, event.OccurredAt); err != nil {
 			return mapError("project runtime ready", err)
 		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE boxes b
+            SET status = 'idle', updated_at = now(), last_activity_at = now(), version = b.version + 1
+            WHERE b.id = $1 AND b.status = 'starting'
+              AND NOT EXISTS (
+                  SELECT 1 FROM runs r
+                  WHERE r.box_id = b.id
+                    AND r.status IN ('dispatching','running','waiting_approval','interrupting','disconnected')
+              )`, event.BoxID); err != nil {
+			return mapError("release resumed box", err)
+		}
 	case "run.started":
 		if _, err := tx.Exec(ctx, `
             UPDATE runs SET status = 'running', started_at = COALESCE(started_at, $2), version = version + 1
@@ -287,8 +298,14 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 		}
 	case "run.completed", "run.failed":
 		status := "succeeded"
+		executionStatus := "completed"
+		notificationType := "run_completed"
+		title := "Run completed"
 		if event.EventType == "run.failed" {
 			status = "failed"
+			executionStatus = "failed"
+			notificationType = "run_failed"
+			title = "Run failed"
 		}
 		reason := payloadString(event.Payload, "reason", "terminalReason", "error")
 		if _, err := tx.Exec(ctx, `
@@ -304,8 +321,43 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 		if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'idle', updated_at = now(), last_activity_at = now(), version = version + 1 WHERE id = $1 AND status <> 'terminated'`, event.BoxID); err != nil {
 			return mapError("release box after run", err)
 		}
+		var scheduleID string
+		scheduleErr := tx.QueryRow(ctx, `
+            UPDATE schedule_executions
+            SET status = $2, reason = NULLIF($3,''), finished_at = $4, updated_at = now()
+            WHERE run_id = $1 AND status IN ('claimed','dispatched')
+            RETURNING schedule_id`, event.RunID, executionStatus, reason, event.OccurredAt).Scan(&scheduleID)
+		if scheduleErr != nil && !errors.Is(scheduleErr, pgx.ErrNoRows) {
+			return mapError("project schedule execution", scheduleErr)
+		}
+		body := "The agent run completed successfully."
+		if executionStatus == "failed" {
+			body = "The agent run failed."
+			if reason != "" {
+				body += " " + reason
+			}
+		}
+		if err := notifyBoxAudienceTx(ctx, tx, event.OrganizationID, event.BoxID,
+			notificationType, title, body, "run-terminal:"+event.RunID,
+			event.RunID, scheduleID, ""); err != nil {
+			return err
+		}
+		if event.HostID != "" {
+			if err := insertAudit(ctx, tx, event.OrganizationID, "daemon", "", event.HostID,
+				"run."+executionStatus, "run", event.RunID,
+				map[string]any{"boxId": event.BoxID, "reason": reason}); err != nil {
+				return err
+			}
+		}
 	case "runtime.exited":
 		reason := payloadString(event.Payload, "reason", "terminalReason", "stopReason")
+		var currentBoxStatus string
+		if err := tx.QueryRow(ctx, `SELECT status FROM boxes WHERE id = $1 FOR UPDATE`, event.BoxID).Scan(&currentBoxStatus); err != nil {
+			return mapError("lock exited runtime box", err)
+		}
+		if currentBoxStatus == string(domain.BoxHibernating) {
+			reason = "hibernated"
+		}
 		if _, err := tx.Exec(ctx, `
             UPDATE runtime_instances
             SET status = 'exited', stopped_at = $2, last_event_at = $2,
@@ -334,11 +386,8 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 			return err
 		}
 	case "approval.resolved":
-		if _, err := tx.Exec(ctx, `UPDATE runs SET status = 'running', version = version + 1 WHERE id = $1 AND status = 'waiting_approval'`, event.RunID); err != nil {
-			return mapError("project resolved approval run", err)
-		}
-		if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'running', updated_at = now(), version = version + 1 WHERE id = $1 AND status = 'waiting_approval'`, event.BoxID); err != nil {
-			return mapError("project resolved approval box", err)
+		if err := projectApprovalResolution(ctx, tx, event); err != nil {
+			return err
 		}
 	case "subagent.started", "subagent.progress", "subagent.completed":
 		if err := projectSubagent(ctx, tx, event); err != nil {
@@ -346,6 +395,14 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 		}
 	case "todo.updated":
 		if err := projectTodo(ctx, tx, event); err != nil {
+			return err
+		}
+	case "artifact.created":
+		if err := projectArtifact(ctx, tx, event); err != nil {
+			return err
+		}
+	case "runtime.snapshot":
+		if err := projectRuntimeSnapshot(ctx, tx, event); err != nil {
 			return err
 		}
 	case "message.completed":
@@ -371,14 +428,15 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 
 func enqueueReadyRunInput(ctx context.Context, tx pgx.Tx, event domain.BoxEvent) error {
 	var organizationID, hostID, runID, messageID, delivery, text string
+	var presentationContext []byte
 	err := tx.QueryRow(ctx, `
-        SELECT r.organization_id, b.host_id, r.id, m.id, m.delivery, COALESCE(m.plain_text, '')
+        SELECT r.organization_id, b.host_id, r.id, m.id, m.delivery, COALESCE(m.plain_text, ''), m.presentation_context
         FROM runs r
         JOIN boxes b ON b.id = r.box_id
         JOIN messages m ON m.id = r.trigger_message_id
         WHERE r.box_id = $1 AND r.runtime_instance_id = $2 AND r.status = 'dispatching'
         ORDER BY r.queued_at LIMIT 1`, event.BoxID, event.RuntimeInstanceID).Scan(
-		&organizationID, &hostID, &runID, &messageID, &delivery, &text)
+		&organizationID, &hostID, &runID, &messageID, &delivery, &text, &presentationContext)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -386,7 +444,7 @@ func enqueueReadyRunInput(ctx context.Context, tx pgx.Tx, event domain.BoxEvent)
 		return mapError("load ready runtime run", err)
 	}
 	_, err = createInputCommandTx(ctx, tx, organizationID, hostID, event.BoxID,
-		runID, event.RuntimeInstanceID, messageID, domain.Delivery(delivery), text)
+		runID, event.RuntimeInstanceID, messageID, domain.Delivery(delivery), text, presentationContext)
 	return err
 }
 
@@ -422,7 +480,7 @@ func projectApprovalRequest(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
         INSERT INTO approvals(
             id, organization_id, box_id, run_id, runtime_instance_id,
             runtime_request_id, tool_name, risk_level, status,
@@ -435,11 +493,165 @@ func projectApprovalRequest(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 	if err != nil {
 		return mapError("project approval request", err)
 	}
+	if tag.RowsAffected() == 0 {
+		if err := tx.QueryRow(ctx, `SELECT id FROM approvals WHERE runtime_instance_id = $1 AND runtime_request_id = $2`, event.RuntimeInstanceID, requestID).Scan(&approvalID); err != nil {
+			return mapError("get projected approval", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE runs SET status = 'waiting_approval', version = version + 1 WHERE id = $1 AND status = 'running'`, event.RunID); err != nil {
 		return mapError("project approval run", err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'waiting_approval', updated_at = now(), version = version + 1 WHERE id = $1 AND status = 'running'`, event.BoxID); err != nil {
 		return mapError("project approval box", err)
+	}
+	if err := notifyBoxAudienceTx(ctx, tx, event.OrganizationID, event.BoxID,
+		"approval_required", "Approval required", "An agent is waiting for approval to use "+toolName+".",
+		"approval-requested:"+approvalID, event.RunID, "", approvalID); err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 && event.HostID != "" {
+		if err := insertAudit(ctx, tx, event.OrganizationID, "daemon", "", event.HostID,
+			"approval.requested", "approval", approvalID,
+			map[string]any{"boxId": event.BoxID, "runId": event.RunID, "runtimeRequestId": requestID, "toolName": toolName}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func projectApprovalResolution(ctx context.Context, tx pgx.Tx, event domain.BoxEvent) error {
+	if event.RuntimeInstanceID == "" {
+		return nil
+	}
+	requestID := payloadString(event.Payload, "runtimeRequestId", "requestId", "approvalId", "id")
+	if requestID == "" {
+		return nil
+	}
+	decision := strings.ToLower(payloadString(event.Payload, "decision", "status", "reason"))
+	status := "denied"
+	if payloadBool(event.Payload, "approved", "allow") || decision == "approved" || decision == "approve" || decision == "allowed" {
+		status = "approved"
+	}
+	if payloadBool(event.Payload, "cancelled", "canceled") || decision == "cancelled" || decision == "canceled" || decision == "interrupted" || decision == "stopped" || decision == "process_exit" || decision == "runtime_failure" || decision == "runtime_cancelled" {
+		status = "cancelled"
+	}
+	payload, err := jsonValue(event.Payload, "{}")
+	if err != nil {
+		return err
+	}
+	var approvalID, runID, boxID string
+	err = tx.QueryRow(ctx, `
+        UPDATE approvals
+        SET status = $3, decision_payload = $4, resolved_at = $5, version = version + 1
+        WHERE runtime_instance_id = $1
+          AND (runtime_request_id = $2 OR id::text = $2)
+          AND status = 'pending'
+        RETURNING id, run_id, box_id`, event.RuntimeInstanceID, requestID, status, payload, event.OccurredAt).Scan(
+		&approvalID, &runID, &boxID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return mapError("project approval resolution", err)
+	}
+	if status != "cancelled" {
+		if _, err := tx.Exec(ctx, `UPDATE runs SET status = 'running', version = version + 1 WHERE id = $1 AND status = 'waiting_approval'`, runID); err != nil {
+			return mapError("project resolved approval run", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'running', updated_at = now(), version = version + 1 WHERE id = $1 AND status = 'waiting_approval'`, boxID); err != nil {
+			return mapError("project resolved approval box", err)
+		}
+	}
+	if event.HostID != "" {
+		return insertAudit(ctx, tx, event.OrganizationID, "daemon", "", event.HostID,
+			"approval.runtime_resolved", "approval", approvalID,
+			map[string]any{"boxId": boxID, "runId": runID, "decision": status, "runtimeRequestId": requestID})
+	}
+	return nil
+}
+
+func projectArtifact(ctx context.Context, tx pgx.Tx, event domain.BoxEvent) error {
+	name := payloadString(event.Payload, "name")
+	hostPath := payloadString(event.Payload, "path", "hostPath", "host_path")
+	sha256Value := strings.ToLower(payloadString(event.Payload, "sha256"))
+	if name == "" || hostPath == "" || len(sha256Value) != 64 {
+		return fmt.Errorf("%w: artifact name, path, and sha256 are required", storepkg.ErrInvalidState)
+	}
+	mimeType := payloadString(event.Payload, "mimeType", "mime_type")
+	kind := "file"
+	if strings.HasPrefix(mimeType, "image/") {
+		kind = "image"
+	} else if strings.Contains(mimeType, "zip") || strings.Contains(mimeType, "tar") || strings.Contains(mimeType, "archive") {
+		kind = "archive"
+	} else if strings.HasPrefix(mimeType, "text/") && (strings.Contains(strings.ToLower(name), "report") || strings.HasSuffix(strings.ToLower(name), ".md")) {
+		kind = "report"
+	} else if strings.Contains(strings.ToLower(name), ".log") {
+		kind = "log"
+	}
+	payload, err := jsonValue(event.Payload, "{}")
+	if err != nil {
+		return err
+	}
+	artifactID := event.EventID
+	_, err = tx.Exec(ctx, `
+        INSERT INTO artifacts(
+            id, organization_id, box_id, run_id, host_id, kind, name,
+            mime_type, storage_backend, host_path, size_bytes, sha256,
+            status, metadata, created_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'host',$9,$10,$11,'ready',$12,$13)
+        ON CONFLICT (id) DO NOTHING`, artifactID, event.OrganizationID, event.BoxID,
+		nullableUUID(event.RunID), event.HostID, kind, name, nullableText(mimeType), hostPath,
+		payloadInt64(event.Payload, "sizeBytes", "size_bytes"), sha256Value, payload, event.OccurredAt)
+	if err != nil {
+		return mapError("project artifact", err)
+	}
+	if event.HostID != "" {
+		return insertAudit(ctx, tx, event.OrganizationID, "daemon", "", event.HostID,
+			"artifact.created", "artifact", artifactID,
+			map[string]any{"boxId": event.BoxID, "runId": event.RunID, "name": name})
+	}
+	return nil
+}
+
+func projectRuntimeSnapshot(ctx context.Context, tx pgx.Tx, event domain.BoxEvent) error {
+	if event.RuntimeInstanceID == "" {
+		return nil
+	}
+	runtimeStatus := strings.ToLower(payloadString(event.Payload, "status"))
+	projected := "ready"
+	switch runtimeStatus {
+	case "running", "busy":
+		projected = "busy"
+	case "starting":
+		projected = "starting"
+	case "stopping":
+		projected = "stopping"
+	case "exited", "stopped":
+		projected = "exited"
+	}
+	if _, err := tx.Exec(ctx, `
+        UPDATE runtime_instances
+        SET status = $2, last_event_at = $3,
+            ready_at = CASE WHEN $2 IN ('ready','busy') THEN COALESCE(ready_at, $3) ELSE ready_at END,
+            stopped_at = CASE WHEN $2 = 'exited' THEN COALESCE(stopped_at, $3) ELSE stopped_at END,
+            version = version + 1
+        WHERE id = $1 AND box_id = $4`, event.RuntimeInstanceID, projected, event.OccurredAt, event.BoxID); err != nil {
+		return mapError("project runtime snapshot", err)
+	}
+	if projected == "busy" {
+		if _, err := tx.Exec(ctx, `UPDATE runs SET status = 'running', version = version + 1 WHERE box_id = $1 AND runtime_instance_id = $2 AND status = 'disconnected'`, event.BoxID, event.RuntimeInstanceID); err != nil {
+			return mapError("reconnect running run", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'running', updated_at = now(), version = version + 1 WHERE id = $1 AND status <> 'terminated'`, event.BoxID); err != nil {
+			return mapError("reconnect running box", err)
+		}
+	} else if projected == "ready" {
+		if _, err := tx.Exec(ctx, `UPDATE runs SET status = 'lost', finished_at = $3, terminal_reason = 'host_reconnected_runtime_idle', version = version + 1 WHERE box_id = $1 AND runtime_instance_id = $2 AND status = 'disconnected'`, event.BoxID, event.RuntimeInstanceID, event.OccurredAt); err != nil {
+			return mapError("resolve disconnected run", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'idle', updated_at = now(), version = version + 1 WHERE id = $1 AND status <> 'terminated'`, event.BoxID); err != nil {
+			return mapError("reconnect idle box", err)
+		}
 	}
 	return nil
 }
@@ -621,6 +833,67 @@ func payloadString(payload json.RawMessage, keys ...string) string {
 			}
 		}
 		return ""
+	}
+	return visit(value)
+}
+
+func payloadBool(payload json.RawMessage, keys ...string) bool {
+	value := payloadValue(payload, keys...)
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(typed, "true") || strings.EqualFold(typed, "yes")
+	default:
+		return false
+	}
+}
+
+func payloadInt64(payload json.RawMessage, keys ...string) int64 {
+	value := payloadValue(payload, keys...)
+	switch typed := value.(type) {
+	case float64:
+		if typed >= 0 {
+			return int64(typed)
+		}
+	case json.Number:
+		parsed, _ := typed.Int64()
+		if parsed >= 0 {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func payloadValue(payload json.RawMessage, keys ...string) any {
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(payload)))
+	decoder.UseNumber()
+	if decoder.Decode(&value) != nil {
+		return nil
+	}
+	var visit func(any) any
+	visit = func(current any) any {
+		switch typed := current.(type) {
+		case map[string]any:
+			for _, key := range keys {
+				if candidate, ok := typed[key]; ok {
+					return candidate
+				}
+			}
+			for _, candidate := range typed {
+				if found := visit(candidate); found != nil {
+					return found
+				}
+			}
+		case []any:
+			for _, candidate := range typed {
+				if found := visit(candidate); found != nil {
+					return found
+				}
+			}
+		}
+		return nil
 	}
 	return visit(value)
 }

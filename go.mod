@@ -3,8 +3,10 @@ module agentbox
 go 1.24.0
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.7.5
 	google.golang.org/grpc v1.72.2
 	google.golang.org/protobuf v1.36.6

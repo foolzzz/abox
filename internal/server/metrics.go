@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bufio"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -43,6 +45,18 @@ func (writer *statusRecorder) Flush() {
 	if flusher, ok := writer.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+func (writer *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := writer.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("response writer does not support hijacking")
+	}
+	return hijacker.Hijack()
+}
+
+func (writer *statusRecorder) Unwrap() http.ResponseWriter {
+	return writer.ResponseWriter
 }
 
 func (writer *statusRecorder) Write(body []byte) (int, error) {

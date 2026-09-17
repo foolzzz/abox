@@ -2,6 +2,7 @@ package omp
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"agentbox/internal/events"
@@ -14,10 +15,7 @@ func (h *ompHandle) normalizeFrame(raw json.RawMessage, actorKindOverride, actor
 		return
 	}
 	frameType := rawString(fields["type"])
-	payload := map[string]any{
-		"runtime":      "omp",
-		"runtimeEvent": raw,
-	}
+	payload := normalizedEventPayload(raw, fields)
 
 	actorKind := actorKindOverride
 	actorID := actorIDOverride
@@ -72,12 +70,12 @@ func (h *ompHandle) normalizeFrame(raw json.RawMessage, actorKindOverride, actor
 			h.emit(events.ToolCompleted, actorKind, actorID, payload)
 		}
 		if rawString(fields["toolName"]) == "todo" {
-			h.emit(events.TodoUpdated, actorKind, actorID, payload)
+			h.emitTodoUpdates(raw, fields, actorKind, actorID)
 		}
 	case "tool_approval_requested":
-		h.emit(events.ApprovalRequested, actorKind, actorID, payload)
+		h.emitNotice("OMP tool approval lifecycle started", raw)
 	case "tool_approval_resolved":
-		h.emit(events.ApprovalResolved, actorKind, actorID, payload)
+		h.emitNotice("OMP tool approval lifecycle finished", raw)
 	case "todo_reminder", "todo_auto_clear", "todo_update", "todo_updated":
 		h.emit(events.TodoUpdated, actorKind, actorID, payload)
 	case "subagent_lifecycle":
@@ -127,7 +125,9 @@ func (h *ompHandle) normalizeFrame(raw json.RawMessage, actorKindOverride, actor
 			"runtime":      "omp",
 			"runtimeEvent": raw,
 		})
-	case "available_commands_update", "command_output", "config_update", "extension_ui_request",
+	case "extension_ui_request":
+		h.handleExtensionUIRequest(raw, fields)
+	case "available_commands_update", "command_output", "config_update",
 		"host_tool_call", "host_tool_cancel", "host_uri_request", "host_uri_cancel",
 		"auto_compaction_start", "auto_compaction_end", "auto_retry_start", "auto_retry_end",
 		"retry_fallback_applied", "retry_fallback_succeeded", "model_changed",
@@ -149,6 +149,60 @@ func (h *ompHandle) emitNotice(message string, raw json.RawMessage) {
 	})
 }
 
+func normalizedEventPayload(raw json.RawMessage, fields map[string]json.RawMessage) map[string]any {
+	payload := map[string]any{
+		"runtime":      "omp",
+		"runtimeEvent": raw,
+	}
+	for key, value := range rawObject(fields["payload"]) {
+		var decoded any
+		if json.Unmarshal(value, &decoded) == nil {
+			payload[key] = decoded
+		}
+	}
+	if agentType := rawString(fields["agent"]); agentType != "" {
+		payload["agentType"] = agentType
+	}
+	return payload
+}
+
+func (h *ompHandle) emitTodoUpdates(raw json.RawMessage, fields map[string]json.RawMessage, actorKind, actorID string) {
+	var result struct {
+		Details struct {
+			Phases []struct {
+				Name  string `json:"name"`
+				Tasks []struct {
+					Status  string `json:"status"`
+					Content string `json:"content"`
+				} `json:"tasks"`
+			} `json:"phases"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(fields["result"], &result) != nil {
+		h.emit(events.TodoUpdated, actorKind, actorID, normalizedEventPayload(raw, fields))
+		return
+	}
+	emitted := false
+	for phaseIndex, phase := range result.Details.Phases {
+		for taskIndex, task := range phase.Tasks {
+			if strings.TrimSpace(task.Content) == "" {
+				continue
+			}
+			h.emit(events.TodoUpdated, actorKind, actorID, map[string]any{
+				"runtime":      "omp",
+				"runtimeEvent": raw,
+				"todoId":       fmt.Sprintf("%d:%d:%s", phaseIndex, taskIndex, task.Content),
+				"phaseName":    phase.Name,
+				"content":      task.Content,
+				"status":       task.Status,
+			})
+			emitted = true
+		}
+	}
+	if !emitted {
+		h.emit(events.TodoUpdated, actorKind, actorID, normalizedEventPayload(raw, fields))
+	}
+}
 func (h *ompHandle) updateSessionReference(fields map[string]json.RawMessage) {
 	sessionRef := firstNonEmpty(rawString(fields["sessionFile"]), rawString(fields["sessionId"]))
 	if sessionRef == "" {
@@ -174,12 +228,18 @@ func messageActor(fields map[string]json.RawMessage, fallbackKind, fallbackID st
 }
 
 func subagentID(fields map[string]json.RawMessage) string {
-	if id := firstNonEmpty(rawString(fields["subagentId"]), rawString(fields["agentId"])); id != "" {
+	return subagentIDFromObject(fields, 0)
+}
+
+func subagentIDFromObject(fields map[string]json.RawMessage, depth int) string {
+	if fields == nil || depth > 3 {
+		return ""
+	}
+	if id := firstNonEmpty(rawString(fields["id"]), rawString(fields["subagentId"]), rawString(fields["agentId"])); id != "" {
 		return id
 	}
-	for _, key := range []string{"subagent", "agent", "record", "progress"} {
-		nested := rawObject(fields[key])
-		if id := firstNonEmpty(rawString(nested["id"]), rawString(nested["subagentId"]), rawString(nested["agentId"])); id != "" {
+	for _, key := range []string{"payload", "subagent", "agent", "record", "progress"} {
+		if id := subagentIDFromObject(rawObject(fields[key]), depth+1); id != "" {
 			return id
 		}
 	}
@@ -187,13 +247,11 @@ func subagentID(fields map[string]json.RawMessage) string {
 }
 
 func subagentLifecycleType(fields map[string]json.RawMessage) string {
+	payload := rawObject(fields["payload"])
 	state := strings.ToLower(strings.Join([]string{
-		rawString(fields["event"]),
-		rawString(fields["action"]),
-		rawString(fields["status"]),
-		rawString(fields["lifecycle"]),
+		rawString(fields["event"]), rawString(fields["action"]), rawString(fields["status"]), rawString(fields["lifecycle"]),
+		rawString(payload["event"]), rawString(payload["action"]), rawString(payload["status"]), rawString(payload["lifecycle"]),
 	}, " "))
-
 	switch {
 	case strings.Contains(state, "start"), strings.Contains(state, "spawn"), strings.Contains(state, "create"), strings.Contains(state, "running"):
 		return events.SubagentStarted
