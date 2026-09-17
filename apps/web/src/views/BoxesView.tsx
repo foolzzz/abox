@@ -64,7 +64,7 @@ export function BoxesView() {
           {filtered.length ? (
             <section className="box-grid" aria-label="Agent boxes">
               {filtered.map((box) => (
-                <Link className="box-card" to={`/boxes/${box.id}`} key={box.id}>
+                <Link className="box-card" to={`/boxes/${box.id}/agent-terminal`} key={box.id}>
                   <div className="box-card__top"><span className="resource-icon resource-icon--box"><Icon name="box" /></span><StatusChip status={box.status} compact /></div>
                   <div><h2>{box.name}</h2><p>{agentNames.get(box.agentId) ?? "Unknown agent"}</p></div>
                   <dl><div><dt>Host</dt><dd>{hostNames.get(box.hostId) ?? "Unknown"}</dd></div><div><dt>Workspace</dt><dd>{workspaceNames.get(box.workspaceId) ?? "Unknown"}</dd></div></dl>
@@ -86,7 +86,7 @@ export function BoxesView() {
         onClose={() => navigate("/boxes", { replace: true })}
         onCreated={(box) => {
           resource.setData((current) => current ? { ...current, boxes: [box, ...current.boxes] } : current);
-          navigate(`/boxes/${box.id}`, { replace: true });
+          navigate(`/boxes/${box.id}/agent-terminal`, { replace: true });
         }}
       />
     </div>
@@ -248,15 +248,15 @@ function CreateBoxModal({
         ) : (
           <>
             {compatibleHosts.length === 0 ? <InlineAlert tone="warning">No online host supports {selectedAgent?.runtimeType.toUpperCase() ?? "this runtime"}.</InlineAlert> : null}
-            <label className="field"><span>{t("boxes.host")}</span><select autoFocus required value={selectedHostId} onChange={(event) => { setHostId(event.target.value); setWorkspaceId(""); }}><option value="">{t("boxes.selectHost")}</option>{compatibleHosts.map((host) => <option value={host.id} key={host.id}>{host.name} · {host.runtimes.join(", ")}</option>)}</select></label>
+            <label className="field"><span>{t("boxes.host")}</span><select autoFocus required value={selectedHostId} onChange={(event) => { setHostId(event.target.value); setWorkspaceId(""); }}><option value="">{t("boxes.selectHost")}</option>{compatibleHosts.map((host) => <option value={host.id} key={host.id}>{host.name} · {host.systemHostname || [host.os, host.arch].filter(Boolean).join("/")} · {host.runtimes.join(", ")}</option>)}</select></label>
             {organizationAdmin ? <fieldset className="segmented-field"><legend>{t("boxes.stepDirectory")}</legend><label><input type="radio" name="placementMode" checked={placementMode === "path"} onChange={() => setPlacementMode("path")} />{t("boxes.pathMode")}</label><label><input type="radio" name="placementMode" checked={placementMode === "workspace"} onChange={() => setPlacementMode("workspace")} />{t("boxes.workspaceMode")}</label></fieldset> : null}
             {placementMode === "path" ? (
               <label className="field"><span>{t("boxes.projectPath")}</span><input className="mono" required value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/Users/name/projects/my-project" /><small>{t("boxes.projectPathHint")}</small></label>
             ) : (
               <label className="field"><span>{t("boxes.registeredWorkspace")}</span><select required value={selectedWorkspaceId} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!selectedHostId}><option value="">{t("boxes.selectWorkspace")}</option>{readyWorkspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.path}</option>)}</select>{selectedHostId && readyWorkspaces.length === 0 ? <small className="field__error">{t("boxes.noWorkspace")}</small> : null}</label>
             )}
-            {selectedHost && placementMode === "path" && projectPath.trim() ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{normalizedProjectPath}</strong><small>{selectedHost.name}</small></div><StatusChip status="validation" compact /></div> : null}
-            {selectedHost && placementMode === "workspace" && selectedWorkspace ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{selectedWorkspace.name}</strong><small>{selectedHost.name} · {selectedWorkspace.path}</small></div>{checkingWorkspaceAccess ? <span className="spinner spinner--small" /> : <StatusChip status={workspaceAccess ?? selectedWorkspace.status} compact />}</div> : null}
+            {selectedHost && placementMode === "path" && projectPath.trim() ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{normalizedProjectPath}</strong><small>{selectedHost.name} · {selectedHost.systemHostname || "hostname unavailable"}</small></div><StatusChip status="validation" compact /></div> : null}
+            {selectedHost && placementMode === "workspace" && selectedWorkspace ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{selectedWorkspace.name}</strong><small>{selectedHost.name} · {selectedHost.systemHostname || "hostname unavailable"} · {selectedWorkspace.path}</small></div>{checkingWorkspaceAccess ? <span className="spinner spinner--small" /> : <StatusChip status={workspaceAccess ?? selectedWorkspace.status} compact />}</div> : null}
             {workspaceAccessError ? <InlineAlert>{workspaceAccessError}</InlineAlert> : null}
             {placementMode === "workspace" && selectedWorkspace && !checkingWorkspaceAccess && !workspaceAccessError && !canUseSelectedWorkspace ? <InlineAlert tone="warning">{t("boxes.viewerWorkspace")}</InlineAlert> : null}
           </>

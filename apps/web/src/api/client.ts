@@ -135,6 +135,8 @@ export const api = {
   listBoxes: (signal?: AbortSignal) => request<Box[]>("/boxes", { signal }),
   createBox: (body: CreateBoxRequest, signal?: AbortSignal) =>
     request<Box>("/boxes", { method: "POST", body, signal }),
+  deleteBox: (boxId: string, signal?: AbortSignal) =>
+    request<void>(`/boxes/${encode(boxId)}`, { method: "DELETE", signal }),
   getBox: (boxId: string, signal?: AbortSignal) =>
     request<BoxSnapshot>(`/boxes/${encode(boxId)}`, { signal }),
   listMessages: (boxId: string, signal?: AbortSignal) =>

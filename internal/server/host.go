@@ -255,6 +255,17 @@ func (s *Server) authenticateHost(ctx context.Context, hello *hostv1.HostHello) 
 	hostID := strings.TrimSpace(hello.GetHostId())
 	credential := strings.TrimSpace(hello.GetCredential())
 	enrollmentToken := strings.TrimSpace(hello.GetEnrollmentToken())
+	systemHostname := strings.TrimSpace(hello.GetSystemHostname())
+	displayName := strings.TrimSpace(hello.GetDisplayName())
+	if len(systemHostname) > 255 || strings.ContainsAny(systemHostname, "\r\n\x00") {
+		return domain.Host{}, "", status.Error(codes.InvalidArgument, "system_hostname is invalid")
+	}
+	if len(displayName) > 512 || strings.ContainsAny(displayName, "\r\n\x00") {
+		return domain.Host{}, "", status.Error(codes.InvalidArgument, "display_name is invalid")
+	}
+	if displayName == "" {
+		displayName = systemHostname
+	}
 
 	var host domain.Host
 	if credential == "" {
@@ -267,10 +278,14 @@ func (s *Server) authenticateHost(ctx context.Context, hello *hostv1.HostHello) 
 		if _, err := uuid.Parse(hostID); err != nil {
 			return domain.Host{}, "", status.Error(codes.InvalidArgument, "host_id must be a UUID")
 		}
+		hostName := displayName
+		if hostName == "" {
+			hostName = defaultHostName(hostID)
+		}
 		host = domain.Host{
 			ID:             hostID,
 			OrganizationID: s.developmentUser.OrganizationID,
-			Name:           defaultHostName(hostID),
+			Name:           hostName,
 			Slug:           defaultHostName(hostID),
 			Status:         domain.HostOnline,
 			MaxActiveBoxes: 4,
@@ -288,8 +303,12 @@ func (s *Server) authenticateHost(ctx context.Context, hello *hostv1.HostHello) 
 		}
 		host = storedHost
 		host.Status = domain.HostOnline
+		if displayName != "" {
+			host.Name = displayName
+		}
 	}
 
+	host.SystemHostname = systemHostname
 	host.OS = hello.GetOs()
 	host.Arch = hello.GetArch()
 	host.DaemonVersion = hello.GetDaemonVersion()

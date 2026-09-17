@@ -24,7 +24,7 @@ export function HostsView() {
             {hosts.map((host) => (
               <article className="resource-card host-card" key={host.id}>
                 <div className="resource-card__top"><span className="resource-icon resource-icon--host"><Icon name="host" /></span><StatusChip status={host.status} /></div>
-                <div className="resource-card__body"><h2>{host.name}</h2><p className="resource-card__subtitle mono">{[host.os, host.arch].filter(Boolean).join(" · ") || "Platform not reported"}</p></div>
+				<div className="resource-card__body"><h2>{host.name}</h2><p className="resource-card__subtitle mono">{host.systemHostname || "Hostname not reported"}</p><p className="resource-card__description">{[host.os, host.arch].filter(Boolean).join(" · ") || "Platform not reported"}</p></div>
                 <div className="runtime-list" aria-label="Supported runtimes">{host.runtimes.length ? host.runtimes.map((runtime) => <span key={runtime}>{runtime}</span>) : <small>No runtimes reported</small>}</div>
                 <dl className="resource-card__facts">
                   <div><dt>Daemon</dt><dd>{host.daemonVersion || "—"}</dd></div>

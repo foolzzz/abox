@@ -242,6 +242,7 @@ func (s *Server) routes() http.Handler {
 		api.With(s.requireRole(roleViewer)).Get("/boxes", s.handleListBoxes)
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}", s.handleGetBox)
 		api.With(s.requireRole(roleViewer)).Post("/boxes", s.handleCreateBox)
+		api.With(s.requireRole(roleViewer)).Delete("/boxes/{boxID}", s.handleDeleteBox)
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/acl", s.handleListBoxACL)
 		api.With(s.requireRole(roleViewer)).Put("/boxes/{boxID}/acl", s.handleReplaceBoxACL)
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/messages", s.handleListMessages)
@@ -270,7 +271,9 @@ func (s *Server) routes() http.Handler {
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/artifacts", s.handleListArtifacts)
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/artifacts/{artifactID}/download", s.handleDownloadArtifact)
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/diff", s.handleWorkspaceDiff)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/terminal", s.handleTerminal)
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/terminal", s.handleCommandTerminal)
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/command-terminal", s.handleCommandTerminal)
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/agent-terminal", s.handleAgentTerminal)
 	})
 
 	if strings.TrimSpace(s.staticDir) != "" {

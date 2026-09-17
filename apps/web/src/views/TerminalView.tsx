@@ -21,8 +21,9 @@ interface TerminalServerMessage {
   error?: string;
 }
 
-export function TerminalView({ boxId }: { boxId: string }) {
+export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "command" }) {
   const { t } = useI18n();
+  const isAgentTerminal = mode === "agent";
   const container = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLElement>(null);
   const socketRef = useRef<WebSocket>();
@@ -83,7 +84,8 @@ export function TerminalView({ boxId }: { boxId: string }) {
     searchAddonRef.current = searchAddon;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${window.location.host}/api/v1/boxes/${encodeURIComponent(boxId)}/terminal`);
+    const terminalPath = isAgentTerminal ? "agent-terminal" : "command-terminal";
+    const socket = new WebSocket(`${protocol}//${window.location.host}/api/v1/boxes/${encodeURIComponent(boxId)}/${terminalPath}`);
     socketRef.current = socket;
     const sendResize = () => {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "resize", columns: terminal.cols, rows: terminal.rows }));
@@ -142,7 +144,7 @@ export function TerminalView({ boxId }: { boxId: string }) {
       if (terminalRef.current === terminal) terminalRef.current = undefined;
       if (searchAddonRef.current === searchAddon) searchAddonRef.current = undefined;
     };
-  }, [boxId, connectionGeneration, t]);
+  }, [boxId, connectionGeneration, isAgentTerminal, t]);
 
   const sendKey = (data: string) => {
     const socket = socketRef.current;
@@ -168,18 +170,23 @@ export function TerminalView({ boxId }: { boxId: string }) {
       <header className="page-heading terminal-heading">
         <div>
           <Link className="back-link" to={`/boxes/${boxId}`}>{t("shell.boxSession")}</Link>
-          <p className="eyebrow">{t("terminal.eyebrow")}</p>
-          <h1>{t("box.terminal")}</h1>
-          <p>{t("terminal.description")}</p>
-          <dl className="terminal-context"><div><dt>{t("box.host")}</dt><dd>{context.data?.host?.name ?? "—"}</dd></div><div><dt>{t("box.workspace")}</dt><dd className="mono" title={context.data?.workspace?.path}>{context.data?.workspace?.path ?? "—"}</dd></div></dl>
+          <p className="eyebrow">{t(isAgentTerminal ? "terminal.agentEyebrow" : "terminal.commandEyebrow")}</p>
+          <h1>{t(isAgentTerminal ? "terminal.agentTitle" : "terminal.commandTitle")}</h1>
+          <p>{t(isAgentTerminal ? "terminal.agentDescription" : "terminal.commandDescription")}</p>
+          <dl className="terminal-context"><div><dt>{t("box.host")}</dt><dd>{context.data?.host ? `${context.data.host.name} · ${context.data.host.systemHostname || "hostname unavailable"}` : "—"}</dd></div><div><dt>{t("box.workspace")}</dt><dd className="mono" title={context.data?.workspace?.path}>{context.data?.workspace?.path ?? "—"}</dd></div>{isAgentTerminal ? <div><dt>Session</dt><dd className="mono">abox-agent-{boxId.slice(0, 8)}</dd></div> : null}</dl>
         </div>
         <div className="terminal-heading__actions"><StatusChip status={status} /><Button icon="refresh" onClick={() => setConnectionGeneration((value) => value + 1)}>{t("terminal.reconnect")}</Button><Button icon="expand" onClick={() => void toggleFullscreen()}>{t("terminal.fullscreen")}</Button></div>
       </header>
+      <nav className="box-panel-nav box-panel-nav--console" aria-label={t("shell.boxOutput")}>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}`}><Icon name="activity" /><span>{t("box.agentConsole")}</span></Link>
+        <Link className={isAgentTerminal ? "box-panel-nav__item box-panel-nav__item--active" : "box-panel-nav__item"} to={`/boxes/${boxId}/agent-terminal`}><Icon name="terminal" /><span>{t("box.agentTerminal")}</span></Link>
+        <Link className={!isAgentTerminal ? "box-panel-nav__item box-panel-nav__item--active" : "box-panel-nav__item"} to={`/boxes/${boxId}/command-terminal`}><Icon name="terminal" /><span>{t("box.commandTerminal")}</span></Link>
+      </nav>
       {error ? <div className="stream-warning" role="alert">{error}</div> : null}
-      <section className="terminal-surface" aria-label={t("terminal.aria")} ref={surface}>
+      <section className="terminal-surface" aria-label={t(isAgentTerminal ? "terminal.agentAria" : "terminal.commandAria")} ref={surface}>
         <div className="terminal-toolbar"><label><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleSearchKey} placeholder={t("terminal.search")} /></label><button type="button" onClick={searchTerminal}>{t("terminal.findNext")}</button></div>
         <div className="terminal-container" ref={container} />
-        <div className="terminal-mobile-keys" aria-label={t("terminal.mobileKeys")}><button type="button" onClick={() => sendKey("\x03")}>Ctrl-C</button><button type="button" onClick={() => sendKey("\x1b")}>Esc</button><button type="button" onClick={() => sendKey("\t")}>Tab</button><button type="button" onClick={() => sendKey("\x1b[A")}>↑</button><button type="button" onClick={() => sendKey("\x1b[B")}>↓</button><button type="button" onClick={() => sendKey("\x1b[D")}>←</button><button type="button" onClick={() => sendKey("\x1b[C")}>→</button></div>
+        <div className="terminal-mobile-keys" aria-label={t("terminal.mobileKeys")}><button type="button" onClick={() => sendKey("\x02")}>Ctrl-B</button><button type="button" onClick={() => sendKey("\x03")}>Ctrl-C</button><button type="button" onClick={() => sendKey("\x1b")}>Esc</button><button type="button" onClick={() => sendKey("\t")}>Tab</button><button type="button" onClick={() => sendKey("\x1b[A")}>↑</button><button type="button" onClick={() => sendKey("\x1b[B")}>↓</button><button type="button" onClick={() => sendKey("\x1b[D")}>←</button><button type="button" onClick={() => sendKey("\x1b[C")}>→</button></div>
       </section>
     </div>
   );

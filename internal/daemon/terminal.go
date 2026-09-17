@@ -8,22 +8,33 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
+	"unicode"
 
 	hostv1 "agentbox/api"
 	"github.com/creack/pty"
 )
 
+const (
+	terminalModeCommand = "command"
+	terminalModeAgent   = "agent"
+)
+
 type terminalSession struct {
-	id      string
-	command *exec.Cmd
-	pty     *os.File
-	cancel  context.CancelFunc
-	once    sync.Once
+	id          string
+	boxID       string
+	mode        string
+	tmuxSession string
+	command     *exec.Cmd
+	pty         *os.File
+	cancel      context.CancelFunc
+	once        sync.Once
 }
 
 type TerminalManager struct {
 	guard       *WorkspaceGuard
+	tmuxBinary  string
 	maxSessions int
 	emit        func(*hostv1.TerminalData) error
 
@@ -31,15 +42,20 @@ type TerminalManager struct {
 	sessions map[string]*terminalSession
 }
 
-func NewTerminalManager(guard *WorkspaceGuard, maxSessions int, emit func(*hostv1.TerminalData) error) (*TerminalManager, error) {
+func NewTerminalManager(guard *WorkspaceGuard, tmuxBinary string, maxSessions int, emit func(*hostv1.TerminalData) error) (*TerminalManager, error) {
 	if guard == nil || emit == nil {
 		return nil, errors.New("workspace guard and terminal emitter are required")
 	}
 	if maxSessions <= 0 {
 		return nil, errors.New("terminal session limit must be positive")
 	}
+	resolvedTmux, err := exec.LookPath(strings.TrimSpace(tmuxBinary))
+	if err != nil {
+		return nil, fmt.Errorf("resolve tmux binary: %w", err)
+	}
 	return &TerminalManager{
 		guard:       guard,
+		tmuxBinary:  resolvedTmux,
 		maxSessions: maxSessions,
 		emit:        emit,
 		sessions:    make(map[string]*terminalSession),
@@ -47,7 +63,16 @@ func NewTerminalManager(guard *WorkspaceGuard, maxSessions int, emit func(*hostv
 }
 
 func (m *TerminalManager) HandleTerminal(ctx context.Context, input *hostv1.TerminalInput) error {
-	if input == nil || input.GetSessionId() == "" {
+	if input == nil {
+		return errors.New("terminal input is required")
+	}
+	if input.GetTerminate() {
+		if strings.TrimSpace(input.GetBoxId()) == "" {
+			return errors.New("box ID is required to terminate an Agent Terminal")
+		}
+		return m.terminateAgentSession(ctx, input.GetBoxId())
+	}
+	if input.GetSessionId() == "" {
 		return errors.New("terminal session ID is required")
 	}
 	if input.GetOpen() {
@@ -80,37 +105,132 @@ func (m *TerminalManager) open(parent context.Context, input *hostv1.TerminalInp
 	if err != nil {
 		return fmt.Errorf("reject terminal workspace: %w", err)
 	}
+	mode := strings.TrimSpace(input.GetMode())
+	if mode == "" {
+		mode = terminalModeCommand
+	}
+	if mode != terminalModeCommand && mode != terminalModeAgent {
+		return fmt.Errorf("unsupported terminal mode %q", mode)
+	}
 	m.mu.Lock()
 	if _, exists := m.sessions[input.GetSessionId()]; exists {
 		m.mu.Unlock()
-		return fmt.Errorf("terminal session %q already exists", input.GetSessionId())
+		return fmt.Errorf("terminal connection %q already exists", input.GetSessionId())
 	}
 	if len(m.sessions) >= m.maxSessions {
 		m.mu.Unlock()
-		return fmt.Errorf("terminal session limit %d reached", m.maxSessions)
+		return fmt.Errorf("terminal connection limit %d reached", m.maxSessions)
 	}
+	m.mu.Unlock()
+
 	ctx, cancel := context.WithCancel(parent)
-	shell := "/bin/sh"
-	args := []string{"-l"}
-	if runtime.GOOS == "windows" {
-		shell = "powershell.exe"
-		args = nil
-	} else if _, statErr := os.Stat("/bin/zsh"); statErr == nil {
-		shell = "/bin/zsh"
+	command, tmuxSession, err := m.terminalCommand(ctx, input, workspace, mode)
+	if err != nil {
+		cancel()
+		return err
 	}
-	command := exec.CommandContext(ctx, shell, args...)
-	command.Dir = workspace
-	command.Env = append(os.Environ(), "TERM=xterm-256color")
+	command.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
 	file, err := pty.StartWithSize(command, &pty.Winsize{Cols: uint16(max(input.GetColumns(), 80)), Rows: uint16(max(input.GetRows(), 24))})
 	if err != nil {
 		cancel()
-		m.mu.Unlock()
 		return fmt.Errorf("start terminal: %w", err)
 	}
-	session := &terminalSession{id: input.GetSessionId(), command: command, pty: file, cancel: cancel}
+	session := &terminalSession{
+		id:          input.GetSessionId(),
+		boxID:       input.GetBoxId(),
+		mode:        mode,
+		tmuxSession: tmuxSession,
+		command:     command,
+		pty:         file,
+		cancel:      cancel,
+	}
+	m.mu.Lock()
+	if _, exists := m.sessions[session.id]; exists || len(m.sessions) >= m.maxSessions {
+		m.mu.Unlock()
+		m.closeSession(session, true)
+		return errors.New("terminal connection capacity changed while opening")
+	}
 	m.sessions[session.id] = session
 	m.mu.Unlock()
 	go m.copyOutput(session)
+	return nil
+}
+
+func (m *TerminalManager) terminalCommand(ctx context.Context, input *hostv1.TerminalInput, workspace, mode string) (*exec.Cmd, string, error) {
+	if mode == terminalModeCommand {
+		shell := "/bin/sh"
+		args := []string{"-l"}
+		if runtime.GOOS == "windows" {
+			shell = "powershell.exe"
+			args = nil
+		} else if _, err := os.Stat("/bin/zsh"); err == nil {
+			shell = "/bin/zsh"
+		}
+		command := exec.CommandContext(ctx, shell, args...)
+		command.Dir = workspace
+		return command, "", nil
+	}
+	if strings.TrimSpace(input.GetBoxId()) == "" || strings.TrimSpace(input.GetRuntimeType()) == "" {
+		return nil, "", errors.New("Agent Terminal requires boxId and runtimeType")
+	}
+	tmuxSession := tmuxSessionName(input.GetBoxId())
+	if err := m.ensureAgentSession(ctx, tmuxSession, workspace, input.GetRuntimeType()); err != nil {
+		return nil, "", err
+	}
+	return exec.CommandContext(ctx, m.tmuxBinary, "attach-session", "-t", "="+tmuxSession), tmuxSession, nil
+}
+
+func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, workspace, runtimeType string) error {
+	if m.tmuxSessionExists(ctx, sessionName) {
+		return nil
+	}
+	var runtimeCommand []string
+	switch runtimeType {
+	case "omp":
+		runtimeCommand = []string{"omp"}
+	case "codex":
+		runtimeCommand = []string{"codex"}
+	default:
+		return fmt.Errorf("runtime %q does not support native Agent Terminal", runtimeType)
+	}
+	args := []string{"new-session", "-d", "-s", sessionName, "-c", workspace, "--"}
+	args = append(args, runtimeCommand...)
+	output, err := exec.CommandContext(ctx, m.tmuxBinary, args...).CombinedOutput()
+	if err != nil {
+		if m.tmuxSessionExists(ctx, sessionName) {
+			return nil
+		}
+		return fmt.Errorf("create tmux Agent Terminal: %w: %s", err, boundedTerminalOutput(output))
+	}
+	_ = exec.CommandContext(ctx, m.tmuxBinary, "set-option", "-t", "="+sessionName, "history-limit", "50000").Run()
+	_ = exec.CommandContext(ctx, m.tmuxBinary, "set-option", "-t", "="+sessionName, "mouse", "on").Run()
+	return nil
+}
+
+func (m *TerminalManager) tmuxSessionExists(ctx context.Context, sessionName string) bool {
+	return exec.CommandContext(ctx, m.tmuxBinary, "has-session", "-t", "="+sessionName).Run() == nil
+}
+
+func (m *TerminalManager) terminateAgentSession(ctx context.Context, boxID string) error {
+	sessionName := tmuxSessionName(boxID)
+	m.mu.Lock()
+	active := make([]*terminalSession, 0)
+	for _, session := range m.sessions {
+		if session.mode == terminalModeAgent && session.boxID == boxID {
+			active = append(active, session)
+		}
+	}
+	m.mu.Unlock()
+	for _, session := range active {
+		m.closeSession(session, true)
+	}
+	if !m.tmuxSessionExists(ctx, sessionName) {
+		return nil
+	}
+	output, err := exec.CommandContext(ctx, m.tmuxBinary, "kill-session", "-t", "="+sessionName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("terminate tmux Agent Terminal: %w: %s", err, boundedTerminalOutput(output))
+	}
 	return nil
 }
 
@@ -166,6 +286,26 @@ func (m *TerminalManager) Close() {
 	for _, session := range sessions {
 		m.closeSession(session, true)
 	}
+}
+
+func tmuxSessionName(boxID string) string {
+	var builder strings.Builder
+	builder.WriteString("abox-agent-")
+	for _, character := range boxID {
+		if unicode.IsLetter(character) || unicode.IsDigit(character) || character == '-' || character == '_' {
+			builder.WriteRune(character)
+		}
+	}
+	return builder.String()
+}
+
+func boundedTerminalOutput(output []byte) string {
+	const limit = 2048
+	text := strings.TrimSpace(string(output))
+	if len(text) > limit {
+		return text[len(text)-limit:]
+	}
+	return text
 }
 
 func max(value, fallback uint32) uint32 {

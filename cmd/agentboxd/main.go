@@ -40,6 +40,8 @@ func run(configPath string) error {
 	}
 	slog.Info("agentboxd starting",
 		"version", version,
+		"host_id", config.HostID,
+		"host_name", config.HostName,
 		"health_addr", config.HealthAddress,
 		"max_active_boxes", config.MaxActiveBoxes,
 		"codex_enabled", config.EnableCodex,

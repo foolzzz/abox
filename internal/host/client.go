@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -98,6 +99,8 @@ type ClientConfig struct {
 	EnrollmentToken   string
 	DaemonInstanceID  string
 	DaemonVersion     string
+	HostName          string
+	SystemHostname    string
 	OS                string
 	Arch              string
 	Runtimes          []*hostv1.RuntimeCapability
@@ -126,6 +129,8 @@ type Client struct {
 	enrollmentToken   string
 	daemonInstanceID  string
 	daemonVersion     string
+	hostName          string
+	systemHostname    string
 	os                string
 	arch              string
 	runtimes          []*hostv1.RuntimeCapability
@@ -205,6 +210,8 @@ func NewClient(config ClientConfig) (*Client, error) {
 		enrollmentToken:   config.EnrollmentToken,
 		daemonInstanceID:  config.DaemonInstanceID,
 		daemonVersion:     config.DaemonVersion,
+		hostName:          strings.TrimSpace(config.HostName),
+		systemHostname:    strings.TrimSpace(config.SystemHostname),
 		os:                config.OS,
 		arch:              config.Arch,
 		runtimes:          cloneRuntimeCapabilities(config.Runtimes),
@@ -467,6 +474,8 @@ func (c *Client) buildHello(ctx context.Context, lastAcked uint64) (*hostv1.Host
 			DaemonVersion:    c.daemonVersion,
 			Os:               c.os,
 			Arch:             c.arch,
+			SystemHostname:   c.systemHostname,
+			DisplayName:      c.hostName,
 			LastAckedHostSeq: lastAcked,
 			Runtimes:         cloneRuntimeCapabilities(c.runtimes),
 			WorkspaceRoots:   cloneWorkspaceRoots(c.workspaceRoots),

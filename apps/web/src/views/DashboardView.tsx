@@ -73,7 +73,7 @@ export function DashboardView() {
           ) : (
             <div className="resource-list resource-list--compact">
               {recentBoxes.map((box) => (
-                <Link className="resource-row resource-row--link" to={`/boxes/${box.id}`} key={box.id}>
+                <Link className="resource-row resource-row--link" to={`/boxes/${box.id}/agent-terminal`} key={box.id}>
                   <span className="resource-icon resource-icon--box"><Icon name="box" /></span>
                   <span className="resource-row__main"><strong>{box.name}</strong><small>{agentNames.get(box.agentId) ?? "Unknown agent"} · {hostNames.get(box.hostId) ?? "Unknown host"}</small></span>
                   <span className="resource-row__meta"><StatusChip status={box.status} compact /><small>{formatDate(box.updatedAt)}</small></span>

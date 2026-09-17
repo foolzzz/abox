@@ -73,6 +73,7 @@ type Host struct {
 	Name           string          `json:"name"`
 	Slug           string          `json:"slug"`
 	Status         HostStatus      `json:"status"`
+	SystemHostname string          `json:"systemHostname,omitempty"`
 	OS             string          `json:"os,omitempty"`
 	Arch           string          `json:"arch,omitempty"`
 	DaemonVersion  string          `json:"daemonVersion,omitempty"`

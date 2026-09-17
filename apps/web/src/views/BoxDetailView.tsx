@@ -12,7 +12,7 @@ import { isObjectRecord } from "../lib/data";
 import { compactJson, extractText, formatTime, humanize, initials, messageText, relativeTime } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 import { currentPresentationContext } from "../lib/presentation";
-import { Link } from "../lib/router";
+import { Link, navigate } from "../lib/router";
 import { ApprovalCard } from "./ApprovalsView";
 
 interface BoxDetailData {
@@ -76,6 +76,9 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
   const [controlError, setControlError] = useState<string>();
   const [confirmStop, setConfirmStop] = useState(false);
   const [sharingOpen, setSharingOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
   const refreshTimer = useRef<number>();
   const conversationRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -140,6 +143,7 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
   const ownsBox = snapshot.ownerUserId === currentUser?.id || directAccess === "owner";
   const hasOrganizationControl = roleAtLeast(currentUser?.role, "admin");
   const canOperateBox = hasOrganizationControl || ownsBox || directAccess === "operator";
+  const canDeleteBox = hasOrganizationControl || snapshot.ownerUserId === currentUser?.id;
   const effectiveAccess = hasOrganizationControl ? `${currentUser?.role} · organization-wide` : ownsBox ? "owner" : directAccess ?? "viewer";
   const recentEvents = events.filter((event) => event.seq > snapshot.lastEventSeq);
   const effectiveStatus = recentEvents.reduce<BoxStatus>((status, event) => {
@@ -209,6 +213,21 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
     }
   };
 
+  const deleteBox = async () => {
+    if (!canDeleteBox || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(undefined);
+    try {
+      await api.deleteBox(boxId);
+      notify(t("box.deleted"));
+      navigate("/boxes", { replace: true });
+    } catch (requestError) {
+      setDeleteError(errorMessage(requestError));
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   return (
     <div className="box-console">
       <header className="box-console__header">
@@ -222,14 +241,17 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
           {canOperateBox && canInterrupt ? <Button icon="interrupt" busy={controlAction === "interrupt"} disabled={Boolean(controlAction)} onClick={() => void control("interrupt")}>{t("box.interrupt")}</Button> : null}
           {canOperateBox && canResume ? <Button icon="resume" variant="primary" busy={controlAction === "resume"} disabled={Boolean(controlAction)} onClick={() => void control("resume")}>{t("box.resume")}</Button> : null}
           {canOperateBox && canStop ? <Button icon="stop" variant="danger" disabled={Boolean(controlAction)} onClick={() => setConfirmStop(true)}>{t("box.stop")}</Button> : null}
+          {canDeleteBox ? <Button icon="trash" variant="danger" disabled={Boolean(controlAction)} onClick={() => setConfirmDelete(true)}>{t("box.delete")}</Button> : null}
         </div>
       </header>
       <nav className="box-panel-nav box-panel-nav--console" aria-label={t("shell.boxOutput")}>
+        <Link className="box-panel-nav__item box-panel-nav__item--active" to={`/boxes/${boxId}`}><Icon name="activity" /><span>{t("box.agentConsole")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/agent-terminal`}><Icon name="terminal" /><span>{t("box.agentTerminal")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/command-terminal`}><Icon name="terminal" /><span>{t("box.commandTerminal")}</span></Link>
         <Link className="box-panel-nav__item" to={`/boxes/${boxId}/subagents`}><Icon name="agent" /><span>{t("box.subagents")}</span></Link>
         <Link className="box-panel-nav__item" to={`/boxes/${boxId}/todos`}><Icon name="todo" /><span>{t("box.todos")}</span></Link>
         <Link className="box-panel-nav__item" to={`/boxes/${boxId}/artifacts`}><Icon name="artifact" /><span>{t("box.artifacts")}</span></Link>
         <Link className="box-panel-nav__item" to={`/boxes/${boxId}/diff`}><Icon name="diff" /><span>{t("box.diff")}</span></Link>
-        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/terminal`}><Icon name="terminal" /><span>{t("box.terminal")}</span></Link>
       </nav>
       {resource.error ? <InlineAlert tone="warning">The latest snapshot could not be loaded. Live events remain connected.</InlineAlert> : null}
       {controlError ? <InlineAlert>{controlError}</InlineAlert> : null}
@@ -310,6 +332,9 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
 
       <Modal open={confirmStop} onClose={() => setConfirmStop(false)} title={`Stop ${snapshot.name}?`} description="The runtime will be asked to stop gracefully." size="small">
         <div className="confirm-dialog"><p>The box and its history remain available, but the active process will end.</p><div className="modal__actions"><Button onClick={() => setConfirmStop(false)}>Keep running</Button><Button variant="danger" icon="stop" busy={controlAction === "stop"} onClick={() => void control("stop")}>Stop box</Button></div></div>
+      </Modal>
+      <Modal open={confirmDelete} onClose={() => { if (!deleteBusy) setConfirmDelete(false); }} title={t("box.deleteTitle", { name: snapshot.name })} description={t("box.deleteDescription")} size="small">
+        <div className="confirm-dialog">{deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}<p>{t("box.deleteWarning")}</p><div className="modal__actions"><Button onClick={() => setConfirmDelete(false)} disabled={deleteBusy}>{t("common.cancel")}</Button><Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => void deleteBox()}>{t("box.deleteConfirm")}</Button></div></div>
       </Modal>
       <AccessControlDialog open={sharingOpen} resourceKind="box" resourceId={boxId} resourceName={snapshot.name} onClose={() => setSharingOpen(false)} onSaved={resource.reload} />
     </div>

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -161,6 +162,99 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
 	return result, err
 }
 
+func (s *Store) DeleteBox(ctx context.Context, user domain.User, boxID string) (*domain.HostCommand, error) {
+	if strings.TrimSpace(boxID) == "" {
+		return nil, fmt.Errorf("%w: box id is required", storepkg.ErrInvalidState)
+	}
+	var command *domain.HostCommand
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		role, err := requireMembership(ctx, tx, user)
+		if err != nil {
+			return err
+		}
+		var organizationID, hostID, ownerUserID, status string
+		var version int64
+		err = tx.QueryRow(ctx, `
+            SELECT organization_id, host_id, owner_user_id, status, version
+            FROM boxes
+            WHERE organization_id = $1 AND id = $2
+            FOR UPDATE`, user.OrganizationID, boxID).Scan(
+			&organizationID, &hostID, &ownerUserID, &status, &version,
+		)
+		if err != nil {
+			return mapError("lock box for deletion", err)
+		}
+		if role != "owner" && role != "admin" && ownerUserID != user.ID {
+			return fmt.Errorf("%w: only the box owner or an organization admin can delete this session", storepkg.ErrForbidden)
+		}
+		if status == string(domain.BoxTerminated) {
+			return nil
+		}
+
+		var runtimeID string
+		if err := tx.QueryRow(ctx, `
+            SELECT COALESCE((
+                SELECT id::text FROM runtime_instances
+                WHERE box_id = $1 AND status IN ('starting','ready','busy','stopping')
+                ORDER BY started_at DESC NULLS LAST, id
+                LIMIT 1
+            ), '')`, boxID).Scan(&runtimeID); err != nil {
+			return mapError("find box runtime for deletion", err)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE runs
+            SET status = 'cancelled', finished_at = now(), terminal_reason = 'box_deleted', version = version + 1
+            WHERE box_id = $1
+              AND status IN ('queued','dispatching','running','waiting_approval','interrupting','disconnected')`, boxID); err != nil {
+			return mapError("cancel deleted box runs", err)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE messages SET status = 'cancelled'
+            WHERE box_id = $1 AND status IN ('queued','dispatched')`, boxID); err != nil {
+			return mapError("cancel deleted box messages", err)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE approvals
+            SET status = 'cancelled', resolved_at = now(),
+                decision_payload = jsonb_build_object('decision','denied','reason','box_deleted'),
+                version = version + 1
+            WHERE box_id = $1 AND status = 'pending'`, boxID); err != nil {
+			return mapError("cancel deleted box approvals", err)
+		}
+		if runtimeID != "" {
+			if _, err := tx.Exec(ctx, `
+                UPDATE runtime_instances SET status = 'stopping', version = version + 1
+                WHERE id = $1 AND status IN ('starting','ready','busy')`, runtimeID); err != nil {
+				return mapError("stop deleted box runtime", err)
+			}
+			created, err := insertHostCommandTx(ctx, tx, domain.HostCommand{
+				OrganizationID:    organizationID,
+				HostID:            hostID,
+				BoxID:             boxID,
+				RuntimeInstanceID: runtimeID,
+				CommandType:       "runtime.stop",
+				Payload:           json.RawMessage(`{"mode":"force"}`),
+				IdempotencyKey:    fmt.Sprintf("runtime:delete:%s:%d", boxID, version),
+				Status:            "pending",
+			})
+			if err != nil {
+				return err
+			}
+			command = &created
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE boxes
+            SET status = 'terminated', terminated_at = COALESCE(terminated_at, now()),
+                updated_at = now(), last_activity_at = now(), version = version + 1
+            WHERE id = $1`, boxID); err != nil {
+			return mapError("terminate deleted box", err)
+		}
+		return insertAudit(ctx, tx, organizationID, "user", user.ID, "",
+			"box.deleted", "box", boxID, map[string]any{"runtimeInstanceId": runtimeID})
+	})
+	return command, err
+}
+
 func (s *Store) GetBox(ctx context.Context, user domain.User, id string) (domain.Box, error) {
 	allowed, err := canReadBox(ctx, s.pool, user, id)
 	if err != nil {
@@ -169,7 +263,7 @@ func (s *Store) GetBox(ctx context.Context, user domain.User, id string) (domain
 	if !allowed {
 		var exists bool
 		if err := s.pool.QueryRow(ctx, `
-            SELECT EXISTS(SELECT 1 FROM boxes WHERE organization_id = $1 AND id = $2)`,
+            SELECT EXISTS(SELECT 1 FROM boxes WHERE organization_id = $1 AND id = $2 AND status <> 'terminated')`,
 			user.OrganizationID, id).Scan(&exists); err != nil {
 			return domain.Box{}, mapError("check box existence", err)
 		}
@@ -192,7 +286,7 @@ func (s *Store) GetBoxForHost(ctx context.Context, hostID, boxID string) (domain
 
 func getBoxByOrganization(ctx context.Context, q querier, organizationID, id string) (domain.Box, error) {
 	result, err := scanBox(q.QueryRow(ctx, boxSelect+`
-        WHERE b.organization_id = $1 AND b.id = $2`, organizationID, id))
+        WHERE b.organization_id = $1 AND b.id = $2 AND b.status <> 'terminated'`, organizationID, id))
 	if err != nil {
 		return domain.Box{}, mapError("get box", err)
 	}
@@ -220,7 +314,7 @@ func canReadBox(ctx context.Context, q querier, user domain.User, boxID string) 
         SELECT EXISTS (
             SELECT 1
             FROM boxes b
-            WHERE b.organization_id = $1 AND b.id = $2
+            WHERE b.organization_id = $1 AND b.id = $2 AND b.status <> 'terminated'
               AND (
                   $4 IN ('owner', 'admin')
                   OR b.owner_user_id = $3
@@ -252,7 +346,7 @@ func canOperateBox(ctx context.Context, q querier, user domain.User, boxID strin
         SELECT EXISTS (
             SELECT 1
             FROM boxes b
-            WHERE b.organization_id = $1 AND b.id = $2
+            WHERE b.organization_id = $1 AND b.id = $2 AND b.status <> 'terminated'
               AND (
                   $4 IN ('owner', 'admin')
                   OR b.owner_user_id = $3
