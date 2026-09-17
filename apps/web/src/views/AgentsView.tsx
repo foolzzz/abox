@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api/client";
 import type { Agent, Host, RuntimeType } from "../api/types";
 import { Icon } from "../components/Icon";
@@ -11,7 +11,7 @@ import { useI18n } from "../lib/i18n";
 import { navigate, useLocation } from "../lib/router";
 
 const DEFAULT_RUNTIME_TYPES: RuntimeType[] = ["omp"];
-const RUNTIME_LABELS: Record<RuntimeType, string> = { omp: "OMP", claude: "Claude", acp: "ACP" };
+const RUNTIME_LABELS: Record<RuntimeType, string> = { omp: "OMP", codex: "Codex", claude: "Claude", acp: "ACP" };
 
 interface AgentListData {
   agents: Agent[];
@@ -28,25 +28,26 @@ export function AgentsView() {
   }, []);
   const canCreate = roleAtLeast(currentUser?.role, "admin");
   const createOpen = canCreate && new URLSearchParams(location.search).get("create") === "1";
-  const runtimeTypes = meta?.enabledRuntimes?.length ? meta.enabledRuntimes : DEFAULT_RUNTIME_TYPES;
+  const runtimeTypes = meta ? meta.enabledRuntimes : DEFAULT_RUNTIME_TYPES;
 
   if (resource.loading) return <LoadingState label={t("agents.load")} />;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
 
   const data = resource.data!;
+  const visibleAgents = data.agents.filter((agent) => runtimeTypes.includes(agent.runtimeType));
   return (
     <div className="page">
       <PageHeader
         eyebrow={t("agents.eyebrow")}
         title={t("agents.title")}
-        description={t(runtimeTypes.length === 1 ? "agents.ompDescription" : "agents.multiDescription")}
+        description={t(runtimeTypes.length === 1 && runtimeTypes[0] === "omp" ? "agents.ompDescription" : "agents.multiDescription")}
         actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/agents?create=1")}>{t("agents.new")}</Button> : null}</>}
       />
       {resource.error ? <InlineAlert tone="warning">{t("agents.stale")}</InlineAlert> : null}
       {!canCreate ? <p className="permission-caption">{t("agents.readOnly", { role: currentUser?.role ?? "viewer" })}</p> : null}
-      {data.agents.length ? (
+      {visibleAgents.length ? (
         <section className="card-grid" aria-label="Agent definitions">
-          {data.agents.map((agent) => <AgentCard agent={agent} key={agent.id} />)}
+          {visibleAgents.map((agent) => <AgentCard agent={agent} key={agent.id} />)}
         </section>
       ) : (
         <EmptyState icon="agent" title={t("agents.empty")} description={t(canCreate ? "agents.emptyAdmin" : "agents.emptyViewer")} action={canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/agents?create=1")}>{t("agents.new")}</Button> : undefined} />
@@ -55,6 +56,7 @@ export function AgentsView() {
         open={createOpen}
         hosts={data.hosts}
         runtimeTypes={runtimeTypes}
+        runtimeModels={meta?.runtimeModels ?? {}}
         onClose={() => navigate("/agents", { replace: true })}
         onCreated={(agent) => {
           resource.setData((current) => current ? { ...current, agents: [agent, ...current.agents] } : { agents: [agent], hosts: data.hosts });
@@ -86,16 +88,16 @@ function AgentCard({ agent }: { agent: Agent }) {
   );
 }
 
-function CreateAgentModal({ open, hosts, runtimeTypes, onClose, onCreated }: { open: boolean; hosts: Host[]; runtimeTypes: RuntimeType[]; onClose: () => void; onCreated: (agent: Agent) => void }) {
+function CreateAgentModal({ open, hosts, runtimeTypes, runtimeModels, onClose, onCreated }: { open: boolean; hosts: Host[]; runtimeTypes: RuntimeType[]; runtimeModels: Partial<Record<RuntimeType, string[]>>; onClose: () => void; onCreated: (agent: Agent) => void }) {
   const { notify } = useToast();
   const { t } = useI18n();
   const [name, setName] = useState("");
-  const [runtimeType, setRuntimeType] = useState<RuntimeType>("omp");
+  const [runtimeType, setRuntimeType] = useState<RuntimeType>(runtimeTypes[0] ?? "omp");
   const [model, setModel] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
-  const runtimeHosts: Record<RuntimeType, number> = { omp: 0, claude: 0, acp: 0 };
+  const runtimeHosts: Record<RuntimeType, number> = { omp: 0, codex: 0, claude: 0, acp: 0 };
   for (const host of hosts) {
     if (host.status !== "online") continue;
     for (const runtime of host.runtimes) {
@@ -103,6 +105,11 @@ function CreateAgentModal({ open, hosts, runtimeTypes, onClose, onCreated }: { o
     }
   }
   const selectedRuntimeHosts = runtimeHosts[runtimeType];
+  const modelSuggestions = runtimeModels[runtimeType] ?? [];
+
+  useEffect(() => {
+    if (!runtimeTypes.includes(runtimeType) && runtimeTypes[0]) setRuntimeType(runtimeTypes[0]);
+  }, [runtimeType, runtimeTypes]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -114,7 +121,7 @@ function CreateAgentModal({ open, hosts, runtimeTypes, onClose, onCreated }: { o
       setName("");
       setModel("");
       setSystemPrompt("");
-      setRuntimeType("omp");
+      setRuntimeType(runtimeTypes[0] ?? "omp");
       onCreated(agent);
     } catch (requestError) {
       setError(errorMessage(requestError));
@@ -136,7 +143,7 @@ function CreateAgentModal({ open, hosts, runtimeTypes, onClose, onCreated }: { o
           })}
         </fieldset>
         {selectedRuntimeHosts === 0 ? <InlineAlert tone="warning">{t("agents.unavailable", { runtime: RUNTIME_LABELS[runtimeType] })}</InlineAlert> : null}
-        <label className="field"><span>{t("agents.model")} <em>{t("common.optional")}</em></span><input value={model} onChange={(event) => setModel(event.target.value)} /><small>{t("agents.modelHint", { runtime: RUNTIME_LABELS[runtimeType] })}</small></label>
+        <label className="field"><span>{t("agents.model")} <em>{t("common.optional")}</em></span><input list={`agent-model-suggestions-${runtimeType}`} value={model} onChange={(event) => setModel(event.target.value)} /><datalist id={`agent-model-suggestions-${runtimeType}`}>{modelSuggestions.map((suggestion) => <option key={suggestion} value={suggestion} />)}</datalist><small>{t("agents.modelHint", { runtime: RUNTIME_LABELS[runtimeType] })}</small></label>
         <label className="field"><span>{t("agents.instructions")}</span><textarea required rows={9} value={systemPrompt} onChange={(event) => setSystemPrompt(event.target.value)} /><small>{t("agents.instructionsHint")}</small></label>
         <div className="modal__actions"><Button type="button" onClick={onClose}>{t("common.cancel")}</Button><Button type="submit" variant="primary" icon="check" busy={submitting} disabled={!name.trim() || !systemPrompt.trim()}>{t("agents.new")}</Button></div>
       </form>

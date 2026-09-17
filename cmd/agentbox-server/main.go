@@ -84,7 +84,9 @@ func run(logger *slog.Logger, configPath string) error {
 		OperationalRetention:    configuration.OperationalRetention,
 		AuditRetention:          configuration.AuditRetention,
 		WebhookSecret:           configuration.WebhookSecret,
+		EnableCodex:             configuration.EnableCodex,
 		EnableClaude:            configuration.EnableClaude,
+		RuntimeModels:           configuration.RuntimeModels,
 	})
 	if err != nil {
 		return err
@@ -131,6 +133,7 @@ func run(logger *slog.Logger, configPath string) error {
 		"version", configuration.Version,
 		"http_addr", configuration.HTTPAddr,
 		"grpc_addr", configuration.GRPCAddr,
+		"codex_enabled", configuration.EnableCodex,
 		"claude_enabled", configuration.EnableClaude,
 	)
 

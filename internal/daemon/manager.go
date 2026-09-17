@@ -17,6 +17,7 @@ import (
 	"agentbox/internal/domain"
 	hostclient "agentbox/internal/host"
 	runtimeapi "agentbox/internal/runtime"
+	codexruntime "agentbox/internal/runtime/codex"
 	ompruntime "agentbox/internal/runtime/omp"
 	"github.com/google/uuid"
 )
@@ -164,12 +165,14 @@ func (m *Manager) HandleCommand(ctx context.Context, command *hostv1.HostCommand
 	if err := ctx.Err(); err != nil {
 		return cancelledResult(err), nil
 	}
-	if command.BoxId == "" {
+	if command.BoxId == "" && command.CommandType != "workspace.validate" {
 		return failedResult("invalid_command", errors.New("box ID is required")), nil
 	}
 
 	var result hostclient.CommandResult
 	switch command.CommandType {
+	case "workspace.validate":
+		result = m.handleWorkspaceValidation(command)
 	case "runtime.start":
 		result = m.handleStart(ctx, command)
 	case "runtime.prompt":
@@ -192,6 +195,26 @@ func (m *Manager) HandleCommand(ctx context.Context, command *hostv1.HostCommand
 		result = failedResult("unsupported_command", fmt.Errorf("unsupported command type %q", command.CommandType))
 	}
 	return result, nil
+}
+
+type workspaceValidationPayload struct {
+	WorkspaceID string `json:"workspaceId"`
+	Path        string `json:"path"`
+}
+
+func (m *Manager) handleWorkspaceValidation(command *hostv1.HostCommand) hostclient.CommandResult {
+	var payload workspaceValidationPayload
+	if err := decodePayload(command.PayloadJson, &payload); err != nil {
+		return failedResult("invalid_payload", err)
+	}
+	if strings.TrimSpace(payload.WorkspaceID) == "" || strings.TrimSpace(payload.Path) == "" {
+		return failedResult("invalid_payload", errors.New("workspaceId and path are required"))
+	}
+	resolved, err := m.guard.ResolveWorkspace(payload.Path)
+	if err != nil {
+		return failedResult("workspace_rejected", err)
+	}
+	return completedJSON(map[string]any{"workspaceId": payload.WorkspaceID, "path": resolved})
 }
 
 type initialInputPayload struct {
@@ -1148,6 +1171,10 @@ func runtimeErrorCode(err error) string {
 	var ompError *ompruntime.Error
 	if errors.As(err, &ompError) && ompError.Code != "" {
 		return ompError.Code
+	}
+	var codexError *codexruntime.Error
+	if errors.As(err, &codexError) && codexError.Code != "" {
+		return codexError.Code
 	}
 	return "runtime_error"
 }

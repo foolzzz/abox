@@ -10,6 +10,7 @@ type Type string
 
 const (
 	TypeOMP    Type = "omp"
+	TypeCodex  Type = "codex"
 	TypeClaude Type = "claude"
 	TypeACP    Type = "acp"
 )

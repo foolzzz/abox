@@ -260,11 +260,13 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 			return mapError("project runtime starting", err)
 		}
 	case "runtime.ready":
+		sessionRef := payloadString(event.Payload, "sessionRef", "threadId", "sessionId")
 		if _, err := tx.Exec(ctx, `
             UPDATE runtime_instances
             SET status = 'ready', ready_at = COALESCE(ready_at, $2),
+                session_ref = COALESCE(NULLIF($3,''), session_ref),
                 last_event_at = $2, version = version + 1
-            WHERE id = $1 AND status IN ('starting','ready','busy')`, event.RuntimeInstanceID, event.OccurredAt); err != nil {
+            WHERE id = $1 AND status IN ('starting','ready','busy')`, event.RuntimeInstanceID, event.OccurredAt, sessionRef); err != nil {
 			return mapError("project runtime ready", err)
 		}
 		if _, err := tx.Exec(ctx, `

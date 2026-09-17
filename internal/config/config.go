@@ -29,28 +29,32 @@ type Config struct {
 	AuditRetention          time.Duration
 	ReaperBatchSize         int
 	WebhookSecret           string
+	EnableCodex             bool
 	EnableClaude            bool
+	RuntimeModels           map[string][]string
 }
 
 type fileConfig struct {
-	DatabaseURL             string `json:"databaseUrl"`
-	HTTPAddr                string `json:"httpAddr"`
-	GRPCAddr                string `json:"grpcAddr"`
-	PublicURL               string `json:"publicUrl"`
-	DevelopmentUser         string `json:"developmentUser"`
-	EnableDevelopmentAuth   bool   `json:"enableDevelopmentAuth"`
-	EnrollmentToken         string `json:"enrollmentToken"`
-	WebDir                  string `json:"webDir"`
-	Version                 string `json:"version"`
-	ApprovalPollInterval    string `json:"approvalPollInterval"`
-	HibernationPollInterval string `json:"hibernationPollInterval"`
-	SchedulePollInterval    string `json:"schedulePollInterval"`
-	RetentionPollInterval   string `json:"retentionPollInterval"`
-	OperationalRetention    string `json:"operationalRetention"`
-	AuditRetention          string `json:"auditRetention"`
-	ReaperBatchSize         int    `json:"reaperBatchSize"`
-	WebhookSecret           string `json:"webhookSecret"`
-	EnableClaude            bool   `json:"enableClaude"`
+	DatabaseURL             string              `json:"databaseUrl"`
+	HTTPAddr                string              `json:"httpAddr"`
+	GRPCAddr                string              `json:"grpcAddr"`
+	PublicURL               string              `json:"publicUrl"`
+	DevelopmentUser         string              `json:"developmentUser"`
+	EnableDevelopmentAuth   bool                `json:"enableDevelopmentAuth"`
+	EnrollmentToken         string              `json:"enrollmentToken"`
+	WebDir                  string              `json:"webDir"`
+	Version                 string              `json:"version"`
+	ApprovalPollInterval    string              `json:"approvalPollInterval"`
+	HibernationPollInterval string              `json:"hibernationPollInterval"`
+	SchedulePollInterval    string              `json:"schedulePollInterval"`
+	RetentionPollInterval   string              `json:"retentionPollInterval"`
+	OperationalRetention    string              `json:"operationalRetention"`
+	AuditRetention          string              `json:"auditRetention"`
+	ReaperBatchSize         int                 `json:"reaperBatchSize"`
+	WebhookSecret           string              `json:"webhookSecret"`
+	EnableCodex             *bool               `json:"enableCodex"`
+	EnableClaude            bool                `json:"enableClaude"`
+	RuntimeModels           map[string][]string `json:"runtimeModels"`
 }
 
 func DefaultPath() (string, error) {
@@ -134,6 +138,14 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	enableCodex := true
+	if raw.EnableCodex != nil {
+		enableCodex = *raw.EnableCodex
+	}
+	runtimeModels, err := normalizeRuntimeModels(raw.RuntimeModels)
+	if err != nil {
+		return Config{}, err
+	}
 	result := Config{
 		DatabaseURL: raw.DatabaseURL, HTTPAddr: raw.HTTPAddr, GRPCAddr: raw.GRPCAddr,
 		PublicURL: raw.PublicURL, DevelopmentUser: raw.DevelopmentUser,
@@ -143,7 +155,8 @@ func Load(path string) (Config, error) {
 		SchedulePollInterval: schedule, RetentionPollInterval: retentionPoll,
 		OperationalRetention: operationalRetention, AuditRetention: auditRetention,
 		ReaperBatchSize: raw.ReaperBatchSize, WebhookSecret: raw.WebhookSecret,
-		EnableClaude: raw.EnableClaude,
+		EnableCodex: enableCodex, EnableClaude: raw.EnableClaude,
+		RuntimeModels: runtimeModels,
 	}
 	if err := result.Validate(); err != nil {
 		return Config{}, fmt.Errorf("validate server config %s: %w", path, err)
@@ -177,6 +190,36 @@ func (c Config) Validate() error {
 		return errors.New("reaperBatchSize must be between 1 and 10000")
 	}
 	return nil
+}
+
+func normalizeRuntimeModels(configured map[string][]string) (map[string][]string, error) {
+	result := map[string][]string{"omp": {}, "codex": {}}
+	for runtimeName, models := range configured {
+		name := strings.TrimSpace(runtimeName)
+		switch name {
+		case "omp", "codex", "claude":
+		default:
+			return nil, fmt.Errorf("runtimeModels contains unsupported runtime %q", runtimeName)
+		}
+		if len(models) > 64 {
+			return nil, fmt.Errorf("runtimeModels.%s cannot contain more than 64 models", name)
+		}
+		seen := make(map[string]struct{}, len(models))
+		normalized := make([]string, 0, len(models))
+		for _, model := range models {
+			model = strings.TrimSpace(model)
+			if model == "" || len(model) > 128 {
+				return nil, fmt.Errorf("runtimeModels.%s entries must be between 1 and 128 characters", name)
+			}
+			if _, duplicate := seen[model]; duplicate {
+				continue
+			}
+			seen[model] = struct{}{}
+			normalized = append(normalized, model)
+		}
+		result[name] = normalized
+	}
+	return result, nil
 }
 
 func parseDuration(name, value string) (time.Duration, error) {

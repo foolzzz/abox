@@ -33,11 +33,12 @@ type metrics struct {
 	hostInventoryReady    atomic.Int64
 	boxInventoryReady     atomic.Int64
 	ompAvailable          atomic.Int64
+	codexAvailable        atomic.Int64
 	claudeAvailable       atomic.Int64
+	codexEnabled          bool
 	claudeEnabled         bool
-
-	failuresMu sync.Mutex
-	failures   map[string]diagnosticFailure
+	failuresMu            sync.Mutex
+	failures              map[string]diagnosticFailure
 }
 
 type diagnosticFailure struct {
@@ -168,9 +169,13 @@ func (m *metrics) handle(writer http.ResponseWriter, _ *http.Request) {
 	activeBoxes := metricGaugeValue(m.boxInventoryReady.Load() == 1, m.activeBoxes.Load())
 	activeRuns := metricGaugeValue(m.boxInventoryReady.Load() == 1, m.activeRuns.Load())
 	ompAvailable := metricGaugeValue(m.hostInventoryReady.Load() == 1, m.ompAvailable.Load())
-	claudeMetric := ""
+	optionalRuntimeMetrics := ""
+	if m.codexEnabled {
+		optionalRuntimeMetrics += fmt.Sprintf("agentbox_runtime_available{runtime=\"codex\"} %s\n",
+			metricGaugeValue(m.hostInventoryReady.Load() == 1, m.codexAvailable.Load()))
+	}
 	if m.claudeEnabled {
-		claudeMetric = fmt.Sprintf("agentbox_runtime_available{runtime=\"claude\"} %s\n",
+		optionalRuntimeMetrics += fmt.Sprintf("agentbox_runtime_available{runtime=\"claude\"} %s\n",
 			metricGaugeValue(m.hostInventoryReady.Load() == 1, m.claudeAvailable.Load()))
 	}
 	_, _ = fmt.Fprintf(writer, `# HELP agentbox_http_requests_total Total HTTP requests served.
@@ -246,7 +251,7 @@ agentbox_reaper_errors_total %d
 		activeBoxes,
 		activeRuns,
 		ompAvailable,
-		claudeMetric,
+		optionalRuntimeMetrics,
 		m.hostInventoryReady.Load(),
 		m.boxInventoryReady.Load(),
 		m.eventBroadcastDropped.Load(),
@@ -325,10 +330,12 @@ func (s *Server) diagnosticSnapshot(ctx context.Context) serverDiagnosticSnapsho
 	if !databaseReady {
 		readiness["database"] = diagnosticComponent{Ready: false, Summary: "one or more database inventories are unavailable"}
 	}
-	runtimeReady := hostErr == nil && s.metrics.ompAvailable.Load() == 1
+	runtimeReady := hostErr == nil && (s.metrics.ompAvailable.Load() == 1 ||
+		(s.enableCodex && s.metrics.codexAvailable.Load() == 1) ||
+		(s.enableClaude && s.metrics.claudeAvailable.Load() == 1))
 	readiness["runtime"] = diagnosticComponent{Ready: runtimeReady}
 	if !runtimeReady {
-		readiness["runtime"] = diagnosticComponent{Ready: false, Summary: "no online host exposes the OMP runtime"}
+		readiness["runtime"] = diagnosticComponent{Ready: false, Summary: "no online host exposes an enabled runtime"}
 	}
 
 	counts := diagnosticCounts{ConnectedHosts: int(s.metrics.hostConnections.Load())}
@@ -368,6 +375,9 @@ func (s *Server) diagnosticSnapshot(ctx context.Context) serverDiagnosticSnapsho
 	runtimes := map[string]diagnosticRuntime{
 		"omp": {Enabled: true, Available: hostErr == nil && s.metrics.ompAvailable.Load() == 1},
 	}
+	if s.enableCodex {
+		runtimes["codex"] = diagnosticRuntime{Enabled: true, Available: hostErr == nil && s.metrics.codexAvailable.Load() == 1}
+	}
 	if s.enableClaude {
 		runtimes["claude"] = diagnosticRuntime{Enabled: true, Available: hostErr == nil && s.metrics.claudeAvailable.Load() == 1}
 	}
@@ -400,6 +410,7 @@ func (s *Server) updateHostGauges(hosts []domain.Host, err error) {
 		return
 	}
 	ompAvailable := false
+	codexAvailable := false
 	claudeAvailable := false
 	for _, host := range hosts {
 		if host.Status != domain.HostOnline || !s.hosts.connected(host.ID) {
@@ -409,12 +420,15 @@ func (s *Server) updateHostGauges(hosts []domain.Host, err error) {
 			switch runtimeName {
 			case "omp":
 				ompAvailable = true
+			case "codex":
+				codexAvailable = true
 			case "claude":
 				claudeAvailable = true
 			}
 		}
 	}
 	s.metrics.ompAvailable.Store(boolGauge(ompAvailable))
+	s.metrics.codexAvailable.Store(boolGauge(codexAvailable))
 	s.metrics.claudeAvailable.Store(boolGauge(claudeAvailable))
 	s.metrics.hostInventoryReady.Store(1)
 }

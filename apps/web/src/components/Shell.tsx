@@ -11,11 +11,11 @@ import { cx } from "./ui";
 
 const NAV_ITEMS: Array<{ to: string; labelKey: string; icon: IconName; minimumRole?: OrganizationRole }> = [
   { to: "/", labelKey: "nav.overview", icon: "dashboard" },
+  { to: "/agents", labelKey: "nav.agents", icon: "agent" },
   { to: "/boxes", labelKey: "nav.boxes", icon: "box" },
   { to: "/schedules", labelKey: "nav.schedules", icon: "schedule" },
   { to: "/approvals", labelKey: "nav.approvals", icon: "approval", minimumRole: "operator" },
   { to: "/notifications", labelKey: "nav.notifications", icon: "notification" },
-  { to: "/agents", labelKey: "nav.agents", icon: "agent" },
   { to: "/hosts", labelKey: "nav.hosts", icon: "host" },
   { to: "/workspaces", labelKey: "nav.workspaces", icon: "workspace" },
   { to: "/members", labelKey: "nav.organization", icon: "members" }

@@ -28,7 +28,8 @@ const STATUS_ZH: Record<string, string> = {
   denied: "已拒绝", completed: "已完成", succeeded: "成功", failed: "失败", error: "错误",
   offline: "离线", available: "可用", unavailable: "不可用", paused: "已暂停", active: "已启用",
   hibernating: "休眠中", hibernated: "已休眠", cancelled: "已取消", expired: "已过期",
-  read_only: "只读", operator: "操作者", admin: "管理员", owner: "所有者", viewer: "查看者"
+  read_only: "只读", operator: "操作者", admin: "管理员", owner: "所有者", viewer: "查看者",
+  validation: "等待验证", connecting: "连接中", connected: "已连接", closed: "已关闭"
 };
 
 

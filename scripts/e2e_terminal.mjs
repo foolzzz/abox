@@ -2,7 +2,8 @@ import WebSocket from "ws";
 
 const base = process.env.AGENTBOX_WS_URL ?? "ws://127.0.0.1:8080";
 const boxId = process.argv[2];
-if (!boxId) throw new Error("usage: node scripts/e2e_terminal.mjs <box-id>");
+const expectedCwd = process.argv[3];
+if (!boxId) throw new Error("usage: node scripts/e2e_terminal.mjs <box-id> [expected-cwd]");
 
 const socket = new WebSocket(`${base}/api/v1/boxes/${encodeURIComponent(boxId)}/terminal`);
 let output = "";
@@ -13,7 +14,7 @@ const timeout = setTimeout(() => {
 }, 30_000);
 
 socket.on("open", () => {
-  setTimeout(() => socket.send(JSON.stringify({ type: "input", data: "\nprintf '\\x54\\x45\\x52\\x4d\\x49\\x4e\\x41\\x4c\\x5f\\x4f\\x4b\\n'\n" })), 2_000);
+  setTimeout(() => socket.send(JSON.stringify({ type: "input", data: "\npwd; printf '\\x54\\x45\\x52\\x4d\\x49\\x4e\\x41\\x4c\\x5f\\x4f\\x4b\\n'\n" })), 2_000);
 });
 socket.on("message", (raw) => {
   const message = JSON.parse(raw.toString());
@@ -21,6 +22,12 @@ socket.on("message", (raw) => {
   if (message.error) {
     clearTimeout(timeout);
     console.error(message.error);
+    process.exit(1);
+  }
+  if (output.includes("TERMINAL_OK") && expectedCwd && !output.includes(expectedCwd)) {
+    clearTimeout(timeout);
+    console.error(`terminal cwd mismatch: expected ${expectedCwd}`);
+    socket.terminate();
     process.exit(1);
   }
   if (output.includes("TERMINAL_OK")) {

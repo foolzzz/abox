@@ -9,7 +9,7 @@
 
 用户可以通过 Tailscale 虚拟局域网，在手机或外部电脑的 Web Console 中持续访问运行在本机或服务器上的 Agent Box。Agent 在用户断开页面后继续工作，用户重新连接后可以恢复对话、查看事件并继续下达指令。
 
-第一版围绕 OMP Agent 提供完整可用产品；Claude Code Adapter 保留在代码中，但默认关闭，作为下一期功能。
+第一版围绕 OMP 与 Codex Runtime 提供完整可用产品；Claude Code Adapter 保留在代码中，但默认关闭，作为下一期功能。
 
 ## 2. 第一版组件
 
@@ -24,20 +24,30 @@
 ## 3. 网络与远程访问
 
 - 所有 Client、Server 和 Host 位于同一个 Tailscale Tailnet。
-- 第一版不实现公网 Relay，不要求公网 IP，不开放 OMP/Claude stdio Runtime 到网络。
+- 第一版不实现公网 Relay，不要求公网 IP，不开放 OMP/Codex/Claude stdio Runtime 到网络。
 - Web Client 仅访问 `agentbox-server`。
 - `agentboxd` 主动连接 `agentbox-server`，Runtime 只在 Host 本地运行。
 - 禁止依赖 Tailscale Funnel。
 
 ## 4. Runtime 范围
 
-### 4.1 第一版
+### 4.1 第一版 Runtime
 
-- 仅对用户开放 OMP Runtime。
+- 对用户开放 OMP 和 Codex Runtime。
 - OMP 使用 `omp --mode rpc`。
-- 支持多轮 Prompt、Steer、Follow-up、Interrupt、Stop、Resume、Subagent、Todo、Tool Event 和 Remote Approval。
+- Codex 使用官方 `codex app-server --listen stdio://` 协议。
+- 两种 Runtime 都直接使用 Execution Host 系统用户现有认证，不由 Agent Box 管理账号或 API Key。
+- 支持多轮 Prompt、Interrupt、Stop、Resume 以及 Runtime 实际声明的能力；不支持的 Steer、Follow-up、Approval 等能力必须准确显示，不允许伪实现。
 
-### 4.2 下一期
+### 4.2 Agent Definition
+
+- Runtime 由用户在 OMP 与 Codex 中选择；Claude 仅在下一期 Feature Flag 开启后出现。
+- 模型字段提供 Runtime 对应的建议列表，同时允许用户填写任意模型 ID；留空时使用 Runtime 默认模型。
+- System Prompt 是 Agent 的持久系统指令：定义角色、输出风格、工作原则和安全边界，并在该 Agent 的 Box 会话中持续生效。
+- System Prompt 不用于填写单次任务，不允许保存账号、API Key 或其他 Secret；单次工作通过 Box 的 Prompt 输入。
+- Agent Definition 更新产生新版本，不修改已经固定版本的 Box。
+
+### 4.3 下一期
 
 - Claude Code stream-json Adapter 可以保留和继续测试。
 - 默认配置 `enableClaude=false`。
@@ -69,7 +79,7 @@
 - 默认状态目录：`~/.agentboxd/state/`。
 - Credential、Journal、Runtime Session、Prompt Snapshot 均存放在该目录的受限子目录中。
 - 可通过 CLI `--config` 或环境变量仅覆盖“配置文件路径”。
-- Server 地址、Workspace Roots、Runtime Binary、并发限制、超时和 Runtime Feature Flag 均来自配置文件。
+- Server 地址、Runtime Binary、并发限制、超时和 Runtime Feature Flag 来自配置文件；项目目录由用户在 Web Console 注册，不要求编辑 daemon 配置。
 
 ### 6.3 权限
 
@@ -172,7 +182,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 
 - Control Plane 不直接执行用户 Shell。
 - Runtime 和 Terminal 仅由 Host daemon 执行。
-- Workspace 必须通过 realpath 校验并限制在配置的 Workspace Roots 内。
+- Workspace 由 Web Console 注册；daemon 通过 `realpath` 验证目录存在、是目录、位于当前 Host 系统用户的 Home 目录内，并拒绝 daemon state 目录。
 - Terminal 需要 Box Operator 权限。
 - Host Command、Message、Event、Schedule Trigger 必须幂等。
 - Runtime Event 先持久化再 SSE 广播。
@@ -189,15 +199,17 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [ ] macOS LaunchAgent 可安装、启动、停止、卸载。
 - [ ] Linux systemd Service 可安装、启动、停止、卸载。
 
-### 13.2 OMP Runtime
+### 13.2 Runtime 与 Agent Definition
 
-- [x] 默认只显示和启动 OMP。
+- [x] 默认显示和启动 OMP 与 Codex。
 - [x] 未显式开启 Feature Flag 时不能创建 Claude Box。
 - [x] OMP 使用 Host 当前系统认证完成真实调用。
-- [x] 连续两轮对话保持 Session。
-- [x] Prompt、Steer、Follow-up、Interrupt、Stop、Resume 实测通过。
-- [x] Subagent、Todo、Tool Event 可展示。
-- [x] Remote Approval 可批准、拒绝和超时默认拒绝。
+- [x] Codex 使用 Host 当前系统认证完成真实调用并保持多轮 Thread。
+- [x] OMP 的 Prompt、Steer、Follow-up、Interrupt、Stop、Resume 实测通过。
+- [x] OMP 的 Subagent、Todo、Tool Event 可展示。
+- [x] OMP Remote Approval 可批准、拒绝和超时默认拒绝。
+- [x] 模型字段同时支持建议列表、自由填写和留空使用 Runtime 默认模型。
+- [x] 页面明确解释 System Prompt 与单次 Prompt 的区别、版本语义和 Secret 边界。
 
 ### 13.3 Remote 与多用户
 
@@ -224,7 +236,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] Webhook 签名错误被拒绝，重复 Idempotency Key 不重复执行。
 - [x] Approval Reaper 和 Hibernation Reaper 在 Server 重启后继续工作。
 - [x] Artifact、Diff、Subagent、Todo、Notification API 与 UI 可用。
-- [x] Terminal 在授权 Workspace 中运行，不能逃逸 Workspace Root。
+- [x] Terminal 在授权 Workspace 中运行，不能逃逸 Host 用户 Home 安全边界。
 
 ### 13.6 可靠性与安全
 

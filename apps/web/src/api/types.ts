@@ -1,4 +1,4 @@
-export type RuntimeType = "omp" | "claude" | "acp";
+export type RuntimeType = "omp" | "codex" | "claude" | "acp";
 export type HostStatus = "enrolling" | "online" | "draining" | "offline" | "revoked";
 export type OrganizationRole = "owner" | "admin" | "operator" | "viewer";
 export type ResourceRole = "owner" | "operator" | "viewer";
@@ -41,6 +41,7 @@ export interface Meta {
   apiVersion: string;
   minDaemonVersion?: string;
   enabledRuntimes: RuntimeType[];
+  runtimeModels: Partial<Record<RuntimeType, string[]>>;
   currentUser: CurrentUser;
 }
 

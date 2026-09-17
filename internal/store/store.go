@@ -26,7 +26,7 @@ type Store interface {
 	GetHostForOrganization(ctx context.Context, organizationID, id string) (domain.Host, error)
 
 	ListWorkspaces(ctx context.Context, user domain.User) ([]domain.Workspace, error)
-	CreateWorkspace(ctx context.Context, user domain.User, input domain.CreateWorkspaceInput) (domain.Workspace, error)
+	CreateWorkspace(ctx context.Context, user domain.User, input domain.CreateWorkspaceInput) (domain.Workspace, *domain.HostCommand, error)
 	GetWorkspace(ctx context.Context, user domain.User, id string) (domain.Workspace, error)
 	GetWorkspaceForOrganization(ctx context.Context, organizationID, id string) (domain.Workspace, error)
 	ListWorkspaceACL(ctx context.Context, user domain.User, workspaceID string) ([]domain.ResourceACL, error)

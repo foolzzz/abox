@@ -254,12 +254,13 @@ func (s *Store) UpdateHostCommand(ctx context.Context, commandID, status, errorC
 	}
 	return s.withTx(ctx, func(tx pgx.Tx) error {
 		var current, commandType, boxID, runID, runtimeID, organizationID, hostID string
+		var commandPayload []byte
 		err := tx.QueryRow(ctx, `
             SELECT status, command_type, COALESCE(box_id::text, ''),
                    COALESCE(run_id::text, ''), COALESCE(runtime_instance_id::text, ''),
-                   organization_id, host_id
+                   organization_id, host_id, payload
             FROM host_commands WHERE id = $1 FOR UPDATE`, commandID).Scan(
-			&current, &commandType, &boxID, &runID, &runtimeID, &organizationID, &hostID)
+			&current, &commandType, &boxID, &runID, &runtimeID, &organizationID, &hostID, &commandPayload)
 		if err != nil {
 			return mapError("lock host command", err)
 		}
@@ -280,6 +281,33 @@ func (s *Store) UpdateHostCommand(ctx context.Context, commandID, status, errorC
             WHERE id = $1`, commandID, status, errorCode, errorMessage, resultValue)
 		if err != nil {
 			return mapError("update host command", err)
+		}
+		if commandType == "workspace.validate" && (status == "completed" || status == "failed" || status == "cancelled") {
+			var payload struct {
+				WorkspaceID string `json:"workspaceId"`
+			}
+			if err := json.Unmarshal(commandPayload, &payload); err != nil || payload.WorkspaceID == "" {
+				return fmt.Errorf("%w: workspace validation command payload is invalid", storepkg.ErrInvalidState)
+			}
+			workspaceStatus := "error"
+			if status == "completed" && resultValue != nil {
+				var validation struct {
+					Path string `json:"path"`
+				}
+				if json.Unmarshal(result, &validation) == nil && validation.Path != "" {
+					workspaceStatus = "ready"
+				}
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE workspaces SET status = $2, updated_at = now(), version = version + 1
+                WHERE id = $1 AND status = 'provisioning'`, payload.WorkspaceID, workspaceStatus); err != nil {
+				return mapError("project workspace validation", err)
+			}
+			if err := insertAudit(ctx, tx, organizationID, "daemon", "", hostID,
+				"workspace.validation_"+workspaceStatus, "workspace", payload.WorkspaceID,
+				map[string]any{"commandId": commandID}); err != nil {
+				return err
+			}
 		}
 
 		if commandType == "runtime.approval_response" && status == "completed" {

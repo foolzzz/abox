@@ -4,7 +4,7 @@
 - 目标版本：MVP → Multi-user V1
 - 核心组件：`agentbox-web`、`agentbox-server`、`agentboxd`
 - 网络前提：所有客户端、Control Plane 与 Execution Host 位于同一 Tailscale Tailnet
-- Runtime 范围：OMP、Claude Code；ACP 作为后续可插拔适配器
+- Runtime 范围：V1 开放 OMP、Codex；Claude Code Adapter 默认关闭；ACP 作为后续可插拔适配器
 
 ## 1. 结论摘要
 
@@ -21,7 +21,7 @@ agentbox-server
 agentboxd
 ```
 
-但代码、构建、测试和 API 边界保持独立。状态存储使用 PostgreSQL。OMP 与 Claude Code 是 `agentboxd` 管理的外部 Runtime，不属于自研服务。
+但代码、构建、测试和 API 边界保持独立。状态存储使用 PostgreSQL。OMP、Codex 与可选 Claude Code 都是 `agentboxd` 管理的外部 Runtime，不属于自研服务。
 
 推荐的首版拓扑：
 
@@ -40,14 +40,14 @@ flowchart LR
     subgraph HostA[本机]
         DaemonA[agentboxd]
         OMPA[OMP RPC]
-        ClaudeA[Claude stream-json]
+        CodexA[Codex App Server]
         WorkspaceA[Workspace]
     end
 
     subgraph HostB[执行服务器]
         DaemonB[agentboxd]
         OMPB[OMP RPC]
-        ClaudeB[Claude stream-json]
+        CodexB[Codex App Server]
         WorkspaceB[Workspace]
     end
 
@@ -57,10 +57,10 @@ flowchart LR
     DaemonA <-->|gRPC 双向流 / Tailnet| Server
     DaemonB <-->|gRPC 双向流 / Tailnet| Server
     DaemonA --> OMPA
-    DaemonA --> ClaudeA
+    DaemonA --> CodexA
     DaemonA --> WorkspaceA
     DaemonB --> OMPB
-    DaemonB --> ClaudeB
+    DaemonB --> CodexB
     DaemonB --> WorkspaceB
 ```
 
@@ -78,7 +78,7 @@ MVP 必须支持：
 - 同一个 Box 支持持续多轮对话。
 - 支持普通 Prompt、Steer、Follow-up、Interrupt、Stop 和 Resume。
 - OMP 通过 `omp --mode rpc` 接入。
-- Claude Code 在 Phase 0 完成 stream-json 协议 Spike，Schema 和 Adapter 接口预留；生产接入安排在 Phase 2。
+- Codex 通过官方 App Server stdio 协议接入；Claude Code stream-json Adapter 已实现但由 Feature Flag 默认关闭。
 - 实时展示文本、工具调用、Todo、Subagent、审批和最终结果。
 - 多个用户可以同时观察同一个 Box。
 - 每个 Box 同一时间只允许一个活跃 Main Agent Turn。
@@ -105,7 +105,7 @@ MVP 不实现：
 1. **Control Plane 不执行用户代码**：Shell、文件和 Runtime 进程只在 `agentboxd` 所在 Host 运行。
 2. **Host 不做权限权威判断**：Control Plane 决定用户是否有权限；Host 对路径、命令和本地资源边界进行第二次强制校验。
 3. **Box 是逻辑对象，不等同于 VM/Container**：Local、Docker、UTM、OpenSandbox 都可以成为未来 Execution Backend。
-4. **Runtime 与 Execution Backend 正交**：OMP/Claude 是 Runtime；Local/Docker/VM 是执行环境。
+4. **Runtime 与 Execution Backend 正交**：OMP/Codex/Claude 是 Runtime；Local/Docker/VM 是执行环境。
 5. **所有状态变化可审计**：用户命令、审批、进程状态、Runtime 事件都有持久记录。
 6. **至少一次传输，幂等消费**：Control Plane 与 daemon 的网络重试不能导致重复 Prompt、重复审批或重复启动进程。
 7. **持久状态优先于内存状态**：关键状态先落 PostgreSQL，再广播给前端。
@@ -151,7 +151,7 @@ Execution Host 是运行 `agentboxd` 的机器。
     "trusted": "true"
   },
   "capabilities": {
-    "runtimes": ["omp", "claude"],
+    "runtimes": ["omp", "codex"],
     "maxActiveBoxes": 4
   }
 }
@@ -171,15 +171,14 @@ Workspace 是 Host 上受控的绝对路径。Control Plane 保存逻辑记录�
 }
 ```
 
-Host 配置允许的根目录：
+Workspace 路径由 Owner/Admin 在 Web Console 新建 Box 时直接填写，不要求用户编辑 `agentboxd` 配置。daemon 默认把当前系统用户的 Home 目录作为安全边界，并在注册阶段执行验证：
 
-```yaml
-workspaceRoots:
-  - /Users/example/projects
-  - /srv/agentbox/workspaces
-```
+1. 路径必须是绝对路径。
+2. `realpath` 后必须存在且为目录。
+3. `realpath` 后必须位于 daemon 系统用户 Home 内。
+4. 路径不能位于 `~/.agentboxd/state` 内。
 
-任何 Workspace 路径都必须在 daemon 端经过 `realpath` 后验证没有逃逸允许根目录。
+验证通过后 Workspace 才从 `provisioning` 进入 `ready`；Runtime 和 Terminal 始终使用 daemon 返回的真实目录作为 `cwd`。
 
 ### 3.4 Agent Box
 
@@ -218,7 +217,7 @@ Agent Box 是用户持续对话的长期对象。
 
 ### 3.6 Runtime Instance
 
-Runtime Instance 是 Host 上真实的 OMP/Claude 子进程。
+Runtime Instance 是 Host 上真实的 OMP、Codex 或可选 Claude 子进程。
 
 ```json
 {
@@ -286,6 +285,7 @@ agentbox/
 │   ├── daemon/
 │   ├── runtime/
 │   │   ├── omp/
+│   │   ├── codex/
 │   │   ├── claude/
 │   │   └── acp/
 │   ├── events/
@@ -308,7 +308,7 @@ agentbox/
 agentbox-web → OpenAPI Client → agentbox-server
 agentbox-server → domain/storage/host protocol
 agentboxd → host protocol/runtime adapters
-runtime adapters → 外部 OMP/Claude 进程
+runtime adapters → 外部 OMP/Codex/Claude 进程
 ```
 
 禁止 `agentbox-web` 复用 Server 内部数据库模型；Web 只依赖公开 API Schema。Server 与 daemon 共享的仅是 Protobuf/Event Schema，不共享带副作用的内部实现。
@@ -344,7 +344,7 @@ dist/agentboxd
 - Terminal。
 - Audit Log 查询。
 
-它不直接访问数据库、Host、OMP 或 Claude。
+它不直接访问数据库、Host、OMP、Codex 或 Claude。
 
 ### 5.2 页面结构
 
@@ -677,19 +677,16 @@ server: https://agentbox.tailnet.ts.net
 hostName: home-mac
 labels:
   location: home
-workspaceRoots:
-  - /Users/example/projects
 runtime:
   omp:
     binary: /Users/example/.local/bin/omp
-    maxProcesses: 4
-  claude:
-    binary: /Users/example/.local/bin/claude
     maxProcesses: 4
 limits:
   maxActiveBoxes: 8
   maxRunDuration: 2h
 ```
+
+项目目录不在该配置中维护。Owner/Admin 在 Web Console 输入本地绝对路径，Server 下发 `workspace.validate` 命令；daemon 以当前系统用户 Home 为边界执行 `realpath` 校验并回报结果。
 
 ### 7.3 Enrollment
 
@@ -817,7 +814,25 @@ omp --mode rpc \
 - 支持 `steer`、`follow_up`、`abort`。
 - 启用 `set_subagent_subscription`，默认 `progress`，按 UI 请求拉完整 transcript。
 
-### 8.3 Claude Adapter
+### 8.3 Codex Adapter
+
+启动：
+
+```bash
+codex app-server --listen stdio://
+```
+
+实现要求：
+
+- 使用 Codex App Server 官方 JSON-RPC/JSONL 协议，不抓取 TUI 文本。
+- 完成 `initialize` 后，通过 `thread/start` 或 `thread/resume` 建立长期 Thread。
+- 每个用户回合通过 `turn/start` 发送，按 Thread/Turn notification 映射文本、工具和终态事件。
+- Interrupt 使用 App Server 协议能力；Stop 负责结束子进程树。
+- 持久化 Thread ID 作为 `sessionRef`，daemon/Runtime 重启后恢复多轮上下文。
+- 只声明实测支持的 Capabilities；不把 Codex 不支持的 OMP Steer/Follow-up/Approval 伪装为可用。
+- 模型为空时沿用 Host `~/.codex/config.toml` 默认值；模型非空时由 Agent Definition 显式传入。
+
+### 8.4 Claude Adapter
 
 Go daemon 直接管理 Claude CLI 的 stream-json 协议，避免新增 Python/Node 常驻 Sidecar：
 
@@ -843,7 +858,7 @@ claude -p \
 - System Prompt Snapshot 默认固定；Agent Definition 升级需要新建 Session。
 - 通过 conformance fixtures 覆盖多个 Claude Code 版本。
 
-### 8.4 Interactive Approval Bridge
+### 8.5 Interactive Approval Bridge
 
 Runtime 的权限请求必须映射为统一 `approval.requested` 事件，并在用户决策后回传 Runtime；不得因为 Adapter 无法处理交互式审批而静默自动批准。
 

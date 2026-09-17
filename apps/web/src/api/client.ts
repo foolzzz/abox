@@ -124,6 +124,8 @@ export const api = {
     request<Agent>("/agents", { method: "POST", body, signal }),
   listHosts: (signal?: AbortSignal) => request<Host[]>("/hosts", { signal }),
   listWorkspaces: (signal?: AbortSignal) => request<Workspace[]>("/workspaces", { signal }),
+  getWorkspace: (workspaceId: string, signal?: AbortSignal) =>
+    request<Workspace>(`/workspaces/${encode(workspaceId)}`, { signal }),
   createWorkspace: (body: CreateWorkspaceRequest, signal?: AbortSignal) =>
     request<Workspace>("/workspaces", { method: "POST", body, signal }),
   getWorkspaceAcl: (workspaceId: string, signal?: AbortSignal) =>

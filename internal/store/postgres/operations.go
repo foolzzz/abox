@@ -446,12 +446,21 @@ func notifyHostOfflineTx(ctx context.Context, tx pgx.Tx, organizationID, hostID,
 	if err != nil {
 		return mapError("load host notification audience", err)
 	}
-	defer rows.Close()
+	userIDs := make([]string, 0)
 	for rows.Next() {
 		var userID string
 		if err := rows.Scan(&userID); err != nil {
+			rows.Close()
 			return mapError("scan host notification audience", err)
 		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return mapError("load host notification audience", err)
+	}
+	rows.Close()
+	for _, userID := range userIDs {
 		id, err := newUUIDv7()
 		if err != nil {
 			return err
@@ -464,5 +473,5 @@ func notifyHostOfflineTx(ctx context.Context, tx pgx.Tx, organizationID, hostID,
 			return mapError("insert host offline notification", err)
 		}
 	}
-	return mapError("load host notification audience", rows.Err())
+	return nil
 }

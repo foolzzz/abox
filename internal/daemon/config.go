@@ -22,6 +22,8 @@ type Config struct {
 	StateDirectory         string
 	WorkspaceRoots         []string
 	OMPBinary              string
+	CodexBinary            string
+	EnableCodex            bool
 	ClaudeBinary           string
 	EnableClaude           bool
 	ClaudePermissionMode   string
@@ -50,6 +52,8 @@ type daemonFileConfig struct {
 	StateDirectory         string   `json:"stateDirectory"`
 	WorkspaceRoots         []string `json:"workspaceRoots"`
 	OMPBinary              string   `json:"ompBinary"`
+	CodexBinary            string   `json:"codexBinary"`
+	EnableCodex            *bool    `json:"enableCodex"`
 	ClaudeBinary           string   `json:"claudeBinary"`
 	EnableClaude           bool     `json:"enableClaude"`
 	ClaudePermissionMode   string   `json:"claudePermissionMode"`
@@ -88,9 +92,13 @@ func DefaultConfigPath() (string, error) {
 }
 
 func LoadConfig(path string) (Config, error) {
-	home, err := DefaultHomeDirectory()
+	daemonHome, err := DefaultHomeDirectory()
 	if err != nil {
 		return Config{}, err
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve user home directory: %w", err)
 	}
 	if strings.TrimSpace(path) == "" {
 		path, err = DefaultConfigPath()
@@ -130,19 +138,27 @@ func LoadConfig(path string) (Config, error) {
 	}
 	stateDirectory := raw.StateDirectory
 	if strings.TrimSpace(stateDirectory) == "" {
-		stateDirectory = filepath.Join(home, "state")
+		stateDirectory = filepath.Join(daemonHome, "state")
 	}
 	stateDirectory, err = expandDaemonPath(stateDirectory)
 	if err != nil {
 		return Config{}, err
 	}
-	roots := make([]string, 0, len(raw.WorkspaceRoots))
-	for _, root := range raw.WorkspaceRoots {
-		expanded, expandErr := expandDaemonPath(root)
-		if expandErr != nil {
-			return Config{}, fmt.Errorf("workspace root %q: %w", root, expandErr)
+	rootCapacity := len(raw.WorkspaceRoots)
+	if rootCapacity == 0 {
+		rootCapacity = 1
+	}
+	roots := make([]string, 0, rootCapacity)
+	if len(raw.WorkspaceRoots) == 0 {
+		roots = append(roots, userHome)
+	} else {
+		for _, root := range raw.WorkspaceRoots {
+			expanded, expandErr := expandDaemonPath(root)
+			if expandErr != nil {
+				return Config{}, fmt.Errorf("workspace root %q: %w", root, expandErr)
+			}
+			roots = append(roots, expanded)
 		}
-		roots = append(roots, expanded)
 	}
 	maxRunDuration, err := positiveDuration("maxRunDuration", raw.MaxRunDuration)
 	if err != nil {
@@ -164,10 +180,19 @@ func LoadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	enableCodex := true
+	if raw.EnableCodex != nil {
+		enableCodex = *raw.EnableCodex
+	}
+	codexBinary := strings.TrimSpace(raw.CodexBinary)
+	if codexBinary == "" {
+		codexBinary = "codex"
+	}
 	result := Config{
-		HomeDirectory: home, ServerAddress: raw.ServerAddress, ServerTLS: raw.ServerTLS,
+		HomeDirectory: daemonHome, ServerAddress: raw.ServerAddress, ServerTLS: raw.ServerTLS,
 		ServerName: raw.ServerName, HostID: raw.HostID, EnrollmentToken: raw.EnrollmentToken,
 		StateDirectory: stateDirectory, WorkspaceRoots: roots, OMPBinary: raw.OMPBinary,
+		CodexBinary: codexBinary, EnableCodex: enableCodex,
 		ClaudeBinary: raw.ClaudeBinary, EnableClaude: raw.EnableClaude,
 		ClaudePermissionMode: raw.ClaudePermissionMode, HealthAddress: raw.HealthAddress,
 		MaxActiveBoxes: raw.MaxActiveBoxes, MaxTerminalSessions: raw.MaxTerminalSessions,
@@ -200,6 +225,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.HostID) == "" && c.EnrollmentToken == "replace-me" {
 		return errors.New("replace placeholder enrollmentToken before first daemon start")
+	}
+	if c.EnableCodex && strings.TrimSpace(c.CodexBinary) == "" {
+		return errors.New("codexBinary is required when enableCodex is true")
 	}
 	if c.EnableClaude && strings.TrimSpace(c.ClaudeBinary) == "" {
 		return errors.New("claudeBinary is required when enableClaude is true")

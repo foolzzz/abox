@@ -5,10 +5,9 @@
   "hostId": "",
   "enrollmentToken": "replace-me",
   "stateDirectory": "~/.agentboxd/state",
-  "workspaceRoots": [
-    "~"
-  ],
   "ompBinary": "omp",
+  "codexBinary": "codex",
+  "enableCodex": true,
   "claudeBinary": "claude",
   "enableClaude": false,
   "claudePermissionMode": "dontAsk",

@@ -44,6 +44,15 @@ func (s *Server) handleCreateSchedule(writer http.ResponseWriter, request *http.
 		return
 	}
 	user, _ := requestUser(request)
+	agent, err := s.store.GetAgent(request.Context(), user, body.AgentID)
+	if err != nil {
+		s.writeStoreError(writer, "get schedule agent", err)
+		return
+	}
+	if !s.runtimeEnabled(agent.RuntimeType) {
+		writeProblem(writer, http.StatusBadRequest, "runtime_disabled", "the selected agent runtime is disabled by server configuration")
+		return
+	}
 	result, err := s.store.CreateSchedule(request.Context(), user, domain.CreateScheduleInput{
 		Name: body.Name, AgentID: body.AgentID, HostID: body.HostID,
 		WorkspaceID: body.WorkspaceID, CronExpression: body.CronExpression,
@@ -74,6 +83,17 @@ func (s *Server) handleUpdateSchedule(writer http.ResponseWriter, request *http.
 		return
 	}
 	user, _ := requestUser(request)
+	if body.AgentID != nil {
+		agent, err := s.store.GetAgent(request.Context(), user, *body.AgentID)
+		if err != nil {
+			s.writeStoreError(writer, "get schedule agent", err)
+			return
+		}
+		if !s.runtimeEnabled(agent.RuntimeType) {
+			writeProblem(writer, http.StatusBadRequest, "runtime_disabled", "the selected agent runtime is disabled by server configuration")
+			return
+		}
+	}
 	result, err := s.store.UpdateSchedule(request.Context(), user, chi.URLParam(request, "scheduleID"), domain.UpdateScheduleInput{
 		Name: body.Name, AgentID: body.AgentID, HostID: body.HostID,
 		WorkspaceID: body.WorkspaceID, CronExpression: body.CronExpression,

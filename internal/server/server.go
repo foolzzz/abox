@@ -41,7 +41,9 @@ type Options struct {
 	OperationalRetention    time.Duration
 	AuditRetention          time.Duration
 	WebhookSecret           string
+	EnableCodex             bool
 	EnableClaude            bool
+	RuntimeModels           map[string][]string
 	HeartbeatInterval       time.Duration
 	HostPendingCommandLimit int
 	SSEReplayLimit          int
@@ -67,7 +69,9 @@ type Server struct {
 	operationalRetention    time.Duration
 	auditRetention          time.Duration
 	webhookSecret           string
+	enableCodex             bool
 	enableClaude            bool
+	runtimeModels           map[string][]string
 	heartbeatInterval       time.Duration
 	hostCommandLimit        int
 	replayLimit             int
@@ -131,8 +135,29 @@ func New(options Options) (*Server, error) {
 	if options.SSESubscriberBuffer <= 0 {
 		options.SSESubscriberBuffer = defaultEventBuffer
 	}
+	runtimeModels := cloneRuntimeModels(options.RuntimeModels)
+	if !options.EnableCodex {
+		delete(runtimeModels, "codex")
+	}
+	if !options.EnableClaude {
+		delete(runtimeModels, "claude")
+	}
+	if _, ok := runtimeModels["omp"]; !ok {
+		runtimeModels["omp"] = []string{}
+	}
+	if options.EnableCodex {
+		if _, ok := runtimeModels["codex"]; !ok {
+			runtimeModels["codex"] = []string{}
+		}
+	}
+	if options.EnableClaude {
+		if _, ok := runtimeModels["claude"]; !ok {
+			runtimeModels["claude"] = []string{}
+		}
+	}
 
 	metricSet := newMetrics()
+	metricSet.codexEnabled = options.EnableCodex
 	metricSet.claudeEnabled = options.EnableClaude
 	server := &Server{
 		store:                   options.Store,
@@ -149,7 +174,9 @@ func New(options Options) (*Server, error) {
 		retentionPollInterval:   options.RetentionPollInterval,
 		operationalRetention:    options.OperationalRetention,
 		auditRetention:          options.AuditRetention,
+		enableCodex:             options.EnableCodex,
 		enableClaude:            options.EnableClaude,
+		runtimeModels:           runtimeModels,
 		webhookSecret:           strings.TrimSpace(options.WebhookSecret),
 		heartbeatInterval:       options.HeartbeatInterval,
 		hostCommandLimit:        options.HostPendingCommandLimit,
@@ -294,13 +321,8 @@ func (s *Server) handleMeta(writer http.ResponseWriter, request *http.Request) {
 		"serverVersion":    s.serverVersion,
 		"apiVersion":       defaultAPIVersion,
 		"minDaemonVersion": "0.1.0",
-		"enabledRuntimes": func() []string {
-			result := []string{"omp"}
-			if s.enableClaude {
-				result = append(result, "claude")
-			}
-			return result
-		}(),
+		"enabledRuntimes":  s.enabledRuntimes(),
+		"runtimeModels":    s.runtimeModels,
 		"currentUser": map[string]string{
 			"id":          user.ID,
 			"login":       user.Login,
@@ -308,6 +330,38 @@ func (s *Server) handleMeta(writer http.ResponseWriter, request *http.Request) {
 			"role":        user.Role,
 		},
 	})
+}
+
+func (s *Server) enabledRuntimes() []string {
+	result := []string{"omp"}
+	if s.enableCodex {
+		result = append(result, "codex")
+	}
+	if s.enableClaude {
+		result = append(result, "claude")
+	}
+	return result
+}
+
+func (s *Server) runtimeEnabled(runtimeType string) bool {
+	switch runtimeType {
+	case "omp":
+		return true
+	case "codex":
+		return s.enableCodex
+	case "claude":
+		return s.enableClaude
+	default:
+		return false
+	}
+}
+
+func cloneRuntimeModels(models map[string][]string) map[string][]string {
+	result := make(map[string][]string, len(models)+2)
+	for runtimeName, suggestions := range models {
+		result[runtimeName] = append([]string(nil), suggestions...)
+	}
+	return result
 }
 
 func statusForStoreError(err error) (int, string) {

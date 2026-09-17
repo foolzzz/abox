@@ -18,7 +18,7 @@ interface BoxListData {
 }
 
 export function BoxesView() {
-  const { currentUser } = useAccess();
+  const { currentUser, meta } = useAccess();
   const { t } = useI18n();
   const location = useLocation();
   const resource = useResource<BoxListData>(async (signal) => {
@@ -39,6 +39,7 @@ export function BoxesView() {
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
 
   const data = resource.data!;
+  const enabledAgents = data.agents.filter((agent) => meta?.enabledRuntimes.includes(agent.runtimeType) ?? agent.runtimeType === "omp");
   const agentNames = new Map(data.agents.map((agent) => [agent.id, agent.name]));
   const hostNames = new Map(data.hosts.map((host) => [host.id, host.name]));
   const workspaceNames = new Map(data.workspaces.map((workspace) => [workspace.id, workspace.name]));
@@ -76,11 +77,12 @@ export function BoxesView() {
       ) : <EmptyState icon="box" title="No boxes yet" description={canCreate ? "Create a box to pair an agent with a ready workspace." : "An operator must create a box and share it with you."} action={canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/boxes?create=1")}>New box</Button> : undefined} />}
       <CreateBoxModal
         open={createOpen}
-        agents={data.agents}
+        agents={enabledAgents}
         hosts={data.hosts}
         workspaces={data.workspaces}
         currentUserId={currentUser?.id}
         organizationAdmin={roleAtLeast(currentUser?.role, "admin")}
+        onWorkspaceCreated={(workspace) => resource.setData((current) => current ? { ...current, workspaces: [workspace, ...current.workspaces.filter((item) => item.id !== workspace.id)] } : current)}
         onClose={() => navigate("/boxes", { replace: true })}
         onCreated={(box) => {
           resource.setData((current) => current ? { ...current, boxes: [box, ...current.boxes] } : current);
@@ -98,6 +100,7 @@ function CreateBoxModal({
   workspaces,
   currentUserId,
   organizationAdmin,
+  onWorkspaceCreated,
   onClose,
   onCreated
 }: {
@@ -107,15 +110,19 @@ function CreateBoxModal({
   workspaces: Workspace[];
   currentUserId?: string;
   organizationAdmin: boolean;
+  onWorkspaceCreated: (workspace: Workspace) => void;
   onClose: () => void;
   onCreated: (box: Box) => void;
 }) {
   const { notify } = useToast();
+  const { t } = useI18n();
   const [step, setStep] = useState(1);
   const [name, setName] = useState("");
   const [agentId, setAgentId] = useState("");
   const [hostId, setHostId] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
+  const [projectPath, setProjectPath] = useState("");
+  const [placementMode, setPlacementMode] = useState<"path" | "workspace">(organizationAdmin ? "path" : "workspace");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const [workspaceAccess, setWorkspaceAccess] = useState<ResourceRole>();
@@ -126,8 +133,9 @@ function CreateBoxModal({
     if (!open) {
       setStep(1);
       setError(undefined);
+      setPlacementMode(organizationAdmin ? "path" : "workspace");
     }
-  }, [open]);
+  }, [open, organizationAdmin]);
 
   const selectedAgentId = agentId || (agents.length === 1 ? agents[0]?.id ?? "" : "");
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
@@ -140,6 +148,7 @@ function CreateBoxModal({
   const selectedWorkspaceId = workspaceId || (readyWorkspaces.length === 1 ? readyWorkspaces[0]?.id ?? "" : "");
   const selectedHost = hosts.find((host) => host.id === selectedHostId);
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
+  const normalizedProjectPath = projectPath.trim().replace(/\/+$/, "") || "/";
 
   useEffect(() => {
     if (hostId && !compatibleHosts.some((host) => host.id === hostId)) {
@@ -147,10 +156,11 @@ function CreateBoxModal({
       setWorkspaceId("");
     }
   }, [agentId, compatibleHosts, hostId]);
+
   useEffect(() => {
     setWorkspaceAccessError(undefined);
-    if (!open || !selectedWorkspaceId) {
-      setWorkspaceAccess(undefined);
+    if (!open || placementMode === "path" || !selectedWorkspaceId) {
+      setWorkspaceAccess(placementMode === "path" && organizationAdmin ? "owner" : undefined);
       setCheckingWorkspaceAccess(false);
       return;
     }
@@ -175,7 +185,7 @@ function CreateBoxModal({
       }
     );
     return () => controller.abort();
-  }, [currentUserId, open, organizationAdmin, selectedWorkspaceId]);
+  }, [currentUserId, open, organizationAdmin, placementMode, selectedWorkspaceId]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -183,16 +193,33 @@ function CreateBoxModal({
       setStep(2);
       return;
     }
-    if (!organizationAdmin && workspaceAccess !== "owner" && workspaceAccess !== "operator") return;
+    if (placementMode === "workspace" && !organizationAdmin && workspaceAccess !== "owner" && workspaceAccess !== "operator") return;
     setSubmitting(true);
     setError(undefined);
     try {
-      const box = await api.createBox({ name: name.trim(), agentId: selectedAgentId, hostId: selectedHostId, workspaceId: selectedWorkspaceId });
+      let targetWorkspaceId = selectedWorkspaceId;
+      if (placementMode === "path") {
+        const existing = workspaces.find((workspace) => workspace.hostId === selectedHostId && (workspace.path.replace(/\/+$/, "") || "/") === normalizedProjectPath);
+        let workspace = existing;
+        if (!workspace || workspace.status === "error") {
+          const pathSegments = normalizedProjectPath.split("/").filter(Boolean);
+          workspace = await api.createWorkspace({
+            hostId: selectedHostId,
+            name: pathSegments.at(-1) || "Project",
+            path: normalizedProjectPath
+          });
+        }
+        if (workspace.status === "provisioning") workspace = await waitForWorkspaceReady(workspace.id);
+        onWorkspaceCreated(workspace);
+        targetWorkspaceId = workspace.id;
+      }
+      const box = await api.createBox({ name: name.trim(), agentId: selectedAgentId, hostId: selectedHostId, workspaceId: targetWorkspaceId });
       notify(`${box.name} was created.`);
       setName("");
       setAgentId("");
       setHostId("");
       setWorkspaceId("");
+      setProjectPath("");
       onCreated(box);
     } catch (requestError) {
       setError(errorMessage(requestError));
@@ -201,36 +228,59 @@ function CreateBoxModal({
     }
   };
 
-  const hasPlacement = compatibleHosts.length > 0 && readyWorkspaces.length > 0;
   const canUseSelectedWorkspace = organizationAdmin || workspaceAccess === "owner" || workspaceAccess === "operator";
+  const directoryReady = placementMode === "path"
+    ? organizationAdmin && selectedHostId !== "" && projectPath.trim().startsWith("/")
+    : selectedHostId !== "" && selectedWorkspaceId !== "" && canUseSelectedWorkspace;
 
   return (
-    <Modal open={open} onClose={onClose} title="Create a box" description="Launch a durable agent session in two steps." size="large">
-      <div className="stepper" aria-label="Creation progress"><span className={cx("stepper__step", step >= 1 && "stepper__step--active")}><b>1</b>Agent</span><span className="stepper__line" /><span className={cx("stepper__step", step >= 2 && "stepper__step--active")}><b>2</b>Placement</span></div>
+    <Modal open={open} onClose={onClose} title={t("boxes.createTitle")} description={t("boxes.createDescription")} size="large">
+      <div className="stepper" aria-label="Creation progress"><span className={cx("stepper__step", step >= 1 && "stepper__step--active")}><b>1</b>{t("boxes.stepAgent")}</span><span className="stepper__line" /><span className={cx("stepper__step", step >= 2 && "stepper__step--active")}><b>2</b>{t("boxes.stepDirectory")}</span></div>
       <form className="form" onSubmit={submit}>
         {error ? <InlineAlert>{error}</InlineAlert> : null}
         {step === 1 ? (
           <>
             {agents.length === 0 ? <InlineAlert tone="warning">Create an agent definition before creating a box.</InlineAlert> : null}
-            <label className="field"><span>Box name</span><input autoFocus required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /><small>Use a name that describes the ongoing work.</small></label>
-            <label className="field"><span>Agent</span><select required value={selectedAgentId} onChange={(event) => { setAgentId(event.target.value); setHostId(""); setWorkspaceId(""); }}><option value="">Select an agent</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.name} · {agent.runtimeType.toUpperCase()}</option>)}</select></label>
+            <label className="field"><span>{t("boxes.boxName")}</span><input autoFocus required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /><small>{t("boxes.boxNameHint")}</small></label>
+            <label className="field"><span>{t("boxes.stepAgent")}</span><select required value={selectedAgentId} onChange={(event) => { setAgentId(event.target.value); setHostId(""); setWorkspaceId(""); }}><option value="">{t("boxes.selectAgent")}</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.name} · {agent.runtimeType.toUpperCase()}</option>)}</select></label>
             {selectedAgent ? <div className="selection-summary"><Icon name="agent" /><div><strong>{selectedAgent.name}</strong><small>{selectedAgent.model || "Runtime default model"} · version {selectedAgent.version}</small></div><StatusChip status={selectedAgent.runtimeType} compact /></div> : null}
           </>
         ) : (
           <>
             {compatibleHosts.length === 0 ? <InlineAlert tone="warning">No online host supports {selectedAgent?.runtimeType.toUpperCase() ?? "this runtime"}.</InlineAlert> : null}
-            <label className="field"><span>Host</span><select autoFocus required value={selectedHostId} onChange={(event) => { setHostId(event.target.value); setWorkspaceId(""); }}><option value="">Select a compatible host</option>{compatibleHosts.map((host) => <option value={host.id} key={host.id}>{host.name} · {host.runtimes.join(", ")}</option>)}</select></label>
-            <label className="field"><span>Workspace</span><select required value={selectedWorkspaceId} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!selectedHostId}><option value="">Select a ready workspace</option>{readyWorkspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.path}</option>)}</select>{selectedHostId && readyWorkspaces.length === 0 ? <small className="field__error">This host has no ready workspaces.</small> : null}</label>
-            {selectedHost && selectedWorkspace ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{selectedWorkspace.name}</strong><small>{selectedHost.name} · {selectedWorkspace.path}</small></div>{checkingWorkspaceAccess ? <span className="spinner spinner--small" /> : <StatusChip status={workspaceAccess ?? selectedWorkspace.status} compact />}</div> : null}
+            <label className="field"><span>{t("boxes.host")}</span><select autoFocus required value={selectedHostId} onChange={(event) => { setHostId(event.target.value); setWorkspaceId(""); }}><option value="">{t("boxes.selectHost")}</option>{compatibleHosts.map((host) => <option value={host.id} key={host.id}>{host.name} · {host.runtimes.join(", ")}</option>)}</select></label>
+            {organizationAdmin ? <fieldset className="segmented-field"><legend>{t("boxes.stepDirectory")}</legend><label><input type="radio" name="placementMode" checked={placementMode === "path"} onChange={() => setPlacementMode("path")} />{t("boxes.pathMode")}</label><label><input type="radio" name="placementMode" checked={placementMode === "workspace"} onChange={() => setPlacementMode("workspace")} />{t("boxes.workspaceMode")}</label></fieldset> : null}
+            {placementMode === "path" ? (
+              <label className="field"><span>{t("boxes.projectPath")}</span><input className="mono" required value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/Users/name/projects/my-project" /><small>{t("boxes.projectPathHint")}</small></label>
+            ) : (
+              <label className="field"><span>{t("boxes.registeredWorkspace")}</span><select required value={selectedWorkspaceId} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!selectedHostId}><option value="">{t("boxes.selectWorkspace")}</option>{readyWorkspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.path}</option>)}</select>{selectedHostId && readyWorkspaces.length === 0 ? <small className="field__error">{t("boxes.noWorkspace")}</small> : null}</label>
+            )}
+            {selectedHost && placementMode === "path" && projectPath.trim() ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{normalizedProjectPath}</strong><small>{selectedHost.name}</small></div><StatusChip status="validation" compact /></div> : null}
+            {selectedHost && placementMode === "workspace" && selectedWorkspace ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{selectedWorkspace.name}</strong><small>{selectedHost.name} · {selectedWorkspace.path}</small></div>{checkingWorkspaceAccess ? <span className="spinner spinner--small" /> : <StatusChip status={workspaceAccess ?? selectedWorkspace.status} compact />}</div> : null}
             {workspaceAccessError ? <InlineAlert>{workspaceAccessError}</InlineAlert> : null}
-            {selectedWorkspace && !checkingWorkspaceAccess && !workspaceAccessError && !canUseSelectedWorkspace ? <InlineAlert tone="warning">Your workspace role is viewer. An owner or operator must create boxes in this workspace.</InlineAlert> : null}
+            {placementMode === "workspace" && selectedWorkspace && !checkingWorkspaceAccess && !workspaceAccessError && !canUseSelectedWorkspace ? <InlineAlert tone="warning">{t("boxes.viewerWorkspace")}</InlineAlert> : null}
           </>
         )}
         <div className="modal__actions">
-          {step === 1 ? <Button type="button" onClick={onClose}>Cancel</Button> : <Button type="button" icon="chevron" onClick={() => setStep(1)}>Back</Button>}
-          <Button type="submit" variant="primary" icon={step === 1 ? "arrow" : "spark"} busy={submitting || checkingWorkspaceAccess} disabled={step === 1 ? !name.trim() || !selectedAgentId : !selectedHostId || !selectedWorkspaceId || !hasPlacement || !canUseSelectedWorkspace}>{step === 1 ? "Choose placement" : "Create box"}</Button>
+          {step === 1 ? <Button type="button" onClick={onClose}>{t("boxes.cancel")}</Button> : <Button type="button" icon="chevron" onClick={() => setStep(1)}>{t("boxes.back")}</Button>}
+          <Button type="submit" variant="primary" icon={step === 1 ? "arrow" : "spark"} busy={submitting || checkingWorkspaceAccess} disabled={step === 1 ? !name.trim() || !selectedAgentId : !directoryReady}>{step === 1 ? t("boxes.chooseDirectory") : submitting && placementMode === "path" ? t("boxes.validatingDirectory") : t("boxes.create")}</Button>
         </div>
       </form>
     </Modal>
   );
+}
+
+async function waitForWorkspaceReady(workspaceId: string): Promise<Workspace> {
+  const deadline = Date.now() + 15_000;
+  let workspace = await api.getWorkspace(workspaceId);
+  while (workspace.status === "provisioning" && Date.now() < deadline) {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    window.setTimeout(resolve, 250);
+    await promise;
+    workspace = await api.getWorkspace(workspaceId);
+  }
+  if (workspace.status !== "ready") {
+    throw new Error(workspace.status === "error" ? "The host rejected this project directory." : "Project directory validation timed out.");
+  }
+  return workspace;
 }

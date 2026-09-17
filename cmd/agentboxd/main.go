@@ -42,6 +42,7 @@ func run(configPath string) error {
 		"version", version,
 		"health_addr", config.HealthAddress,
 		"max_active_boxes", config.MaxActiveBoxes,
+		"codex_enabled", config.EnableCodex,
 		"claude_enabled", config.EnableClaude,
 	)
 

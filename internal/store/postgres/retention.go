@@ -39,6 +39,7 @@ func (s *Store) PruneOperationalData(ctx context.Context, operationalBefore, aud
 				query: `WITH doomed AS (
                     SELECT id FROM schedule_executions
                     WHERE status IN ('completed','failed','skipped') AND updated_at < $1
+                      AND NOT EXISTS (SELECT 1 FROM webhook_deliveries w WHERE w.execution_id = schedule_executions.id)
                     ORDER BY updated_at LIMIT $2 FOR UPDATE SKIP LOCKED
                 ) DELETE FROM schedule_executions WHERE id IN (SELECT id FROM doomed)`,
 				before: operationalBefore,

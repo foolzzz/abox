@@ -241,13 +241,15 @@ func (s *Server) handleCreateAgent(writer http.ResponseWriter, request *http.Req
 		writeProblem(writer, http.StatusBadRequest, "invalid_request", "name and systemPrompt are required")
 		return
 	}
+	body.RuntimeType = strings.TrimSpace(body.RuntimeType)
 	if body.RuntimeType == "" {
 		body.RuntimeType = "omp"
 	}
-	if body.RuntimeType != "omp" && !(body.RuntimeType == "claude" && s.enableClaude) {
-		writeProblem(writer, http.StatusBadRequest, "runtime_disabled", "the first release supports OMP; Claude requires enableClaude=true")
+	if !s.runtimeEnabled(body.RuntimeType) {
+		writeProblem(writer, http.StatusBadRequest, "runtime_disabled", "the first release enables OMP and Codex; Claude requires enableClaude=true")
 		return
 	}
+	body.Model = strings.TrimSpace(body.Model)
 	user, _ := requestUser(request)
 	agent, err := s.store.CreateAgent(request.Context(), user, domain.CreateAgentInput{
 		Name:         body.Name,
@@ -321,7 +323,7 @@ func (s *Server) handleCreateWorkspace(writer http.ResponseWriter, request *http
 		body.Kind = "existing"
 	}
 	user, _ := requestUser(request)
-	workspace, err := s.store.CreateWorkspace(request.Context(), user, domain.CreateWorkspaceInput{
+	workspace, command, err := s.store.CreateWorkspace(request.Context(), user, domain.CreateWorkspaceInput{
 		HostID: body.HostID,
 		Name:   body.Name,
 		Path:   body.Path,
@@ -331,7 +333,12 @@ func (s *Server) handleCreateWorkspace(writer http.ResponseWriter, request *http
 		s.writeStoreError(writer, "create workspace", err)
 		return
 	}
-	writeJSON(writer, http.StatusCreated, workspace)
+	if command != nil {
+		s.dispatch(command)
+		writeJSON(writer, http.StatusAccepted, workspace)
+		return
+	}
+	writeJSON(writer, http.StatusOK, workspace)
 }
 
 func (s *Server) handleListBoxes(writer http.ResponseWriter, request *http.Request) {
@@ -370,6 +377,15 @@ func (s *Server) handleCreateBox(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	user, _ := requestUser(request)
+	agent, err := s.store.GetAgent(request.Context(), user, body.AgentID)
+	if err != nil {
+		s.writeStoreError(writer, "get box agent", err)
+		return
+	}
+	if !s.runtimeEnabled(agent.RuntimeType) {
+		writeProblem(writer, http.StatusBadRequest, "runtime_disabled", "the selected agent runtime is disabled by server configuration")
+		return
+	}
 	box, err := s.store.CreateBox(request.Context(), user, domain.CreateBoxInput{
 		Name:        body.Name,
 		AgentID:     body.AgentID,
@@ -539,6 +555,10 @@ func (s *Server) handleResume(writer http.ResponseWriter, request *http.Request)
 	agent, err := s.store.GetAgent(request.Context(), user, box.AgentID)
 	if err != nil {
 		s.writeStoreError(writer, "get agent for resume", err)
+		return
+	}
+	if !s.runtimeEnabled(box.RuntimeType) {
+		writeProblem(writer, http.StatusBadRequest, "runtime_disabled", "the selected agent runtime is disabled by server configuration")
 		return
 	}
 	approvalMode := ""

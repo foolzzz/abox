@@ -16,5 +16,10 @@
   "auditRetention": "8760h",
   "reaperBatchSize": 100,
   "webhookSecret": "replace-me",
-  "enableClaude": false
+  "enableCodex": true,
+  "enableClaude": false,
+  "runtimeModels": {
+    "omp": ["gpt-5.2", "claude-sonnet", "gemini-2.5-pro"],
+    "codex": ["gpt-5.3-codex", "gpt-5.2-codex"]
+  }
 }

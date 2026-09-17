@@ -17,7 +17,7 @@ interface ScheduleData {
 }
 
 export function SchedulesView() {
-  const { currentUser } = useAccess();
+  const { currentUser, meta } = useAccess();
   const { notify } = useToast();
   const canManage = roleAtLeast(currentUser?.role, "operator");
   const resource = useResource<ScheduleData>(async (signal) => {
@@ -40,6 +40,7 @@ export function SchedulesView() {
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
 
   const data = resource.data!;
+  const enabledAgents = data.agents.filter((agent) => meta?.enabledRuntimes.includes(agent.runtimeType) ?? agent.runtimeType === "omp");
   const agentNames = new Map(data.agents.map((agent) => [agent.id, agent.name]));
   const hostNames = new Map(data.hosts.map((host) => [host.id, host.name]));
   const workspaceNames = new Map(data.workspaces.map((workspace) => [workspace.id, workspace.name]));
@@ -103,7 +104,7 @@ export function SchedulesView() {
       <ScheduleEditor
         open={Boolean(editor)}
         schedule={editor === "new" ? undefined : editor}
-        agents={data.agents}
+        agents={enabledAgents}
         hosts={data.hosts}
         workspaces={data.workspaces}
         onClose={() => setEditor(undefined)}

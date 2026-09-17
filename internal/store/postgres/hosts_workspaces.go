@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"agentbox/internal/domain"
@@ -295,83 +296,153 @@ func (s *Store) ListWorkspaces(ctx context.Context, user domain.User) ([]domain.
 	return result, nil
 }
 
-func (s *Store) CreateWorkspace(ctx context.Context, user domain.User, input domain.CreateWorkspaceInput) (domain.Workspace, error) {
-	if input.HostID == "" || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Path) == "" {
-		return domain.Workspace{}, fmt.Errorf("%w: host, name, and path are required", storepkg.ErrInvalidState)
+func (s *Store) CreateWorkspace(ctx context.Context, user domain.User, input domain.CreateWorkspaceInput) (domain.Workspace, *domain.HostCommand, error) {
+	input.Path = filepath.Clean(strings.TrimSpace(input.Path))
+	input.Name = strings.TrimSpace(input.Name)
+	if input.HostID == "" || input.Name == "" || input.Path == "" {
+		return domain.Workspace{}, nil, fmt.Errorf("%w: host, name, and path are required", storepkg.ErrInvalidState)
+	}
+	if !filepath.IsAbs(input.Path) {
+		return domain.Workspace{}, nil, fmt.Errorf("%w: workspace path must be absolute", storepkg.ErrInvalidState)
 	}
 	if input.Kind == "" {
 		input.Kind = "existing"
 	}
 	var result domain.Workspace
+	var command *domain.HostCommand
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		if _, err := requireRole(ctx, tx, user, "owner", "admin"); err != nil {
 			return err
 		}
 		var hostStatus domain.HostStatus
+		var hostLabels []byte
 		err := tx.QueryRow(ctx, `
-            SELECT status FROM hosts
+            SELECT status, labels FROM hosts
             WHERE organization_id = $1 AND id = $2
-            FOR SHARE`, user.OrganizationID, input.HostID).Scan(&hostStatus)
+            FOR SHARE`, user.OrganizationID, input.HostID).Scan(&hostStatus, &hostLabels)
 		if err != nil {
 			return mapError("get workspace host", err)
 		}
-		if hostStatus == domain.HostRevoked || hostStatus == domain.HostDraining {
-			return fmt.Errorf("%w: host is %s", storepkg.ErrInvalidState, hostStatus)
+		if hostStatus != domain.HostOnline {
+			return fmt.Errorf("%w: host is %s", storepkg.ErrHostOffline, hostStatus)
+		}
+		if !workspacePathAdvertised(hostLabels, input.Path) {
+			return fmt.Errorf("%w: path is outside the host user home", storepkg.ErrInvalidState)
 		}
 
-		rootID, err := newUUIDv7()
-		if err != nil {
-			return err
-		}
-		rootMode := "both"
-		if input.Kind == "existing" {
-			rootMode = "existing"
-		}
+		var workspaceID, workspaceStatus string
 		err = tx.QueryRow(ctx, `
-            INSERT INTO host_workspace_roots(
-                id, organization_id, host_id, display_path, real_path, mode, enabled
-            ) VALUES ($1,$2,$3,$4,$4,$5,true)
-            ON CONFLICT (host_id, real_path) DO UPDATE
-            SET enabled = true, updated_at = now()
-            RETURNING id`, rootID, user.OrganizationID, input.HostID, input.Path, rootMode).Scan(&rootID)
-		if err != nil {
-			return mapError("ensure workspace root", err)
+            SELECT id, status FROM workspaces
+            WHERE organization_id = $1 AND host_id = $2 AND real_path = $3
+            FOR UPDATE`, user.OrganizationID, input.HostID, input.Path).Scan(&workspaceID, &workspaceStatus)
+		if err == nil {
+			result, err = getWorkspace(ctx, tx, user.OrganizationID, workspaceID)
+			if err != nil || workspaceStatus == "ready" || workspaceStatus == "provisioning" {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE workspaces SET status = 'provisioning', updated_at = now(), version = version + 1 WHERE id = $1`, workspaceID); err != nil {
+				return mapError("retry workspace validation", err)
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return mapError("find workspace by path", err)
+		} else {
+			rootID, err := newUUIDv7()
+			if err != nil {
+				return err
+			}
+			rootMode := "both"
+			if input.Kind == "existing" {
+				rootMode = "existing"
+			}
+			err = tx.QueryRow(ctx, `
+                INSERT INTO host_workspace_roots(
+                    id, organization_id, host_id, display_path, real_path, mode, enabled
+                ) VALUES ($1,$2,$3,$4,$4,$5,true)
+                ON CONFLICT (host_id, real_path) DO UPDATE
+                SET enabled = true, updated_at = now()
+                RETURNING id`, rootID, user.OrganizationID, input.HostID, input.Path, rootMode).Scan(&rootID)
+			if err != nil {
+				return mapError("ensure workspace root", err)
+			}
+
+			workspaceID, err = newUUIDv7()
+			if err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `
+                INSERT INTO workspaces(
+                    id, organization_id, host_id, workspace_root_id, name, kind,
+                    display_path, real_path, status, created_by_user_id
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,'provisioning',$8)`,
+				workspaceID, user.OrganizationID, input.HostID, rootID,
+				input.Name, input.Kind, input.Path, user.ID); err != nil {
+				return mapError("insert workspace", err)
+			}
+			aclID, err := newUUIDv7()
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `
+                INSERT INTO workspace_acl(
+                    id, organization_id, workspace_id, user_id, role, created_by_user_id
+                ) VALUES ($1,$2,$3,$4,'owner',$4)`,
+				aclID, user.OrganizationID, workspaceID, user.ID); err != nil {
+				return mapError("insert workspace owner acl", err)
+			}
 		}
 
-		workspaceID, err := newUUIDv7()
+		payload, err := json.Marshal(map[string]string{"workspaceId": workspaceID, "path": input.Path})
+		if err != nil {
+			return fmt.Errorf("encode workspace validation command: %w", err)
+		}
+		attemptID, err := newUUIDv7()
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `
-            INSERT INTO workspaces(
-                id, organization_id, host_id, workspace_root_id, name, kind,
-                display_path, real_path, status, created_by_user_id
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,'ready',$8)`,
-			workspaceID, user.OrganizationID, input.HostID, rootID,
-			strings.TrimSpace(input.Name), input.Kind, input.Path, user.ID)
-		if err != nil {
-			return mapError("insert workspace", err)
-		}
-		aclID, err := newUUIDv7()
+		createdCommand, err := insertHostCommandTx(ctx, tx, domain.HostCommand{
+			OrganizationID: user.OrganizationID,
+			HostID:         input.HostID,
+			CommandType:    "workspace.validate",
+			Payload:        payload,
+			IdempotencyKey: "workspace:validate:" + workspaceID + ":" + attemptID,
+			Status:         "pending",
+		})
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `
-            INSERT INTO workspace_acl(
-                id, organization_id, workspace_id, user_id, role, created_by_user_id
-            ) VALUES ($1,$2,$3,$4,'owner',$4)`,
-			aclID, user.OrganizationID, workspaceID, user.ID); err != nil {
-			return mapError("insert workspace owner acl", err)
-		}
+		command = &createdCommand
 		if err := insertAudit(ctx, tx, user.OrganizationID, "user", user.ID, "",
-			"workspace.created", "workspace", workspaceID,
+			"workspace.validation_requested", "workspace", workspaceID,
 			map[string]any{"hostId": input.HostID, "path": input.Path}); err != nil {
 			return err
 		}
 		result, err = getWorkspace(ctx, tx, user.OrganizationID, workspaceID)
 		return err
 	})
-	return result, err
+	return result, command, err
+}
+
+func workspacePathAdvertised(labels []byte, candidate string) bool {
+	var value struct {
+		WorkspaceRoots []struct {
+			Path     string `json:"path"`
+			RealPath string `json:"real_path"`
+		} `json:"workspaceRoots"`
+	}
+	if json.Unmarshal(labels, &value) != nil {
+		return false
+	}
+	for _, root := range value.WorkspaceRoots {
+		rootPath := root.RealPath
+		if rootPath == "" {
+			rootPath = root.Path
+		}
+		relative, err := filepath.Rel(filepath.Clean(rootPath), candidate)
+		if err == nil && (relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) GetWorkspace(ctx context.Context, user domain.User, id string) (domain.Workspace, error) {

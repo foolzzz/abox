@@ -15,6 +15,7 @@ export type IconName =
   | "plus"
   | "arrow"
   | "refresh"
+  | "expand"
   | "send"
   | "stop"
   | "interrupt"
@@ -57,6 +58,7 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     plus: <path d="M12 5v14M5 12h14"/>,
     arrow: <path d="m9 18 6-6-6-6"/>,
     refresh: <><path d="M20 12a8 8 0 1 1-2.3-5.7L20 8"/><path d="M20 3v5h-5"/></>,
+    expand: <><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/><path d="m3 8 6-6M21 8l-6-6M3 16l6 6M21 16l-6 6"/></>,
     send: <><path d="m22 2-7 20-4-9-9-4 20-7Z"/><path d="M22 2 11 13"/></>,
     stop: <rect x="6" y="6" width="12" height="12" rx="2"/>,
     interrupt: <><path d="M7 5v14M17 5v14"/></>,

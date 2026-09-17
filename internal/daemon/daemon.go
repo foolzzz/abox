@@ -20,6 +20,7 @@ import (
 	hostclient "agentbox/internal/host"
 	runtimeapi "agentbox/internal/runtime"
 	clauderuntime "agentbox/internal/runtime/claude"
+	codexruntime "agentbox/internal/runtime/codex"
 	ompruntime "agentbox/internal/runtime/omp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -94,6 +95,16 @@ func New(config Config) (*Daemon, error) {
 		staticApprovalMode string
 	}{
 		{adapter: ompruntime.New(ompruntime.Config{Binary: config.OMPBinary}), binary: config.OMPBinary},
+	}
+	if config.EnableCodex {
+		runtimeCandidates = append(runtimeCandidates, struct {
+			adapter            runtimeapi.Adapter
+			binary             string
+			staticApprovalMode string
+		}{
+			adapter: codexruntime.New(codexruntime.Config{Binary: config.CodexBinary}),
+			binary:  config.CodexBinary,
+		})
 	}
 	if config.EnableClaude {
 		claudePolicy, policyErr := clauderuntime.StaticPermissionPolicy(config.ClaudePermissionMode)
