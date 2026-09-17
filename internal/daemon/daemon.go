@@ -19,6 +19,7 @@ import (
 	hostv1 "agentbox/api"
 	hostclient "agentbox/internal/host"
 	runtimeapi "agentbox/internal/runtime"
+	clauderuntime "agentbox/internal/runtime/claude"
 	ompruntime "agentbox/internal/runtime/omp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -42,6 +43,10 @@ type Daemon struct {
 func New(config Config) (*Daemon, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
+	}
+	claudePolicy, err := clauderuntime.StaticPermissionPolicy(config.ClaudePermissionMode)
+	if err != nil {
+		return nil, fmt.Errorf("AGENTBOX_CLAUDE_PERMISSION_MODE: %w", err)
 	}
 	guard, err := NewWorkspaceGuard(config.WorkspaceRoots, config.StateDirectory)
 	if err != nil {
@@ -79,23 +84,59 @@ func New(config Config) (*Daemon, error) {
 		return nil, err
 	}
 
-	adapter := ompruntime.New(ompruntime.Config{Binary: config.OMPBinary})
-	probeCtx, cancelProbe := context.WithTimeout(context.Background(), config.RuntimeProbeTime)
-	runtimeVersion, capabilities, probeErr := adapter.Probe(probeCtx)
-	cancelProbe()
-	runtimeStatus := "available"
-	if probeErr != nil {
-		runtimeStatus = "unavailable"
+	runtimeCandidates := []struct {
+		adapter            runtimeapi.Adapter
+		binary             string
+		staticApprovalMode string
+	}{
+		{adapter: ompruntime.New(ompruntime.Config{Binary: config.OMPBinary}), binary: config.OMPBinary},
+		{adapter: clauderuntime.New(clauderuntime.WithBinary(config.ClaudeBinary)), binary: config.ClaudeBinary, staticApprovalMode: claudePolicy.Mode},
 	}
-	manager, err := NewManager(adapter, runtimeVersion, capabilities, guard, state, config.MaxActiveBoxes, config.MaxRunDuration)
+	registrations := make([]AdapterRegistration, 0, len(runtimeCandidates))
+	advertisedRuntimes := make([]*hostv1.RuntimeCapability, 0, len(runtimeCandidates))
+	runtimeVersions := make([]string, 0, len(runtimeCandidates))
+	var probeErrors error
+	for _, candidate := range runtimeCandidates {
+		probeCtx, cancelProbe := context.WithTimeout(context.Background(), config.RuntimeProbeTime)
+		version, capabilities, probeErr := candidate.adapter.Probe(probeCtx)
+		cancelProbe()
+		if probeErr != nil {
+			probeErrors = errors.Join(probeErrors, fmt.Errorf("probe %s runtime: %w", candidate.adapter.Name(), probeErr))
+			continue
+		}
+		capabilitiesJSON, err := json.Marshal(capabilities)
+		if err != nil {
+			return nil, fmt.Errorf("encode %s capabilities: %w", candidate.adapter.Name(), err)
+		}
+		binaryPath := candidate.binary
+		if resolved, resolveErr := exec.LookPath(candidate.binary); resolveErr == nil {
+			if absolute, absoluteErr := filepath.Abs(resolved); absoluteErr == nil {
+				binaryPath = absolute
+			}
+		}
+		registrations = append(registrations, AdapterRegistration{
+			Adapter:            candidate.adapter,
+			Version:            version,
+			Capabilities:       capabilities,
+			StaticApprovalMode: candidate.staticApprovalMode,
+		})
+		advertisedRuntimes = append(advertisedRuntimes, &hostv1.RuntimeCapability{
+			Name:             string(candidate.adapter.Name()),
+			Version:          version,
+			BinaryPath:       binaryPath,
+			Status:           "available",
+			CapabilitiesJson: capabilitiesJSON,
+		})
+		runtimeVersions = append(runtimeVersions, fmt.Sprintf("%s=%s", candidate.adapter.Name(), version))
+	}
+	manager, err := NewManager(registrations, guard, state, config.MaxActiveBoxes, config.MaxRunDuration)
 	if err != nil {
 		return nil, err
 	}
-	health := NewHealthStatus(manager, probeErr == nil, runtimeVersion)
-	if probeErr != nil {
-		health.SetError(probeErr)
+	health := NewHealthStatus(manager, len(registrations) > 0, strings.Join(runtimeVersions, ","))
+	if probeErrors != nil {
+		health.SetError(probeErrors)
 	}
-
 	target, transportCredentials, err := transport(config)
 	if err != nil {
 		return nil, err
@@ -111,16 +152,6 @@ func New(config Config) (*Daemon, error) {
 		}
 	}()
 
-	capabilitiesJSON, err := json.Marshal(capabilities)
-	if err != nil {
-		return nil, fmt.Errorf("encode OMP capabilities: %w", err)
-	}
-	binaryPath := config.OMPBinary
-	if resolved, resolveErr := exec.LookPath(config.OMPBinary); resolveErr == nil {
-		if absolute, absoluteErr := filepath.Abs(resolved); absoluteErr == nil {
-			binaryPath = absolute
-		}
-	}
 	workspaceRoots := make([]*hostv1.WorkspaceRoot, 0, len(guard.Roots()))
 	for _, root := range guard.Roots() {
 		workspaceRoots = append(workspaceRoots, &hostv1.WorkspaceRoot{
@@ -145,13 +176,7 @@ func New(config Config) (*Daemon, error) {
 		EnrollmentToken:   config.EnrollmentToken,
 		DaemonInstanceID:  instanceID,
 		DaemonVersion:     config.DaemonVersion,
-		Runtimes: []*hostv1.RuntimeCapability{{
-			Name:             string(runtimeapi.TypeOMP),
-			Version:          runtimeVersion,
-			BinaryPath:       binaryPath,
-			Status:           runtimeStatus,
-			CapabilitiesJson: capabilitiesJSON,
-		}},
+		Runtimes:          advertisedRuntimes,
 		WorkspaceRoots:    workspaceRoots,
 		HeartbeatInterval: config.HeartbeatInterval,
 		Backoff:           hostclient.DefaultBackoff(),

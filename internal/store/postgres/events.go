@@ -267,9 +267,6 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
             WHERE id = $1 AND status IN ('starting','ready','busy')`, event.RuntimeInstanceID, event.OccurredAt); err != nil {
 			return mapError("project runtime ready", err)
 		}
-		if err := enqueueReadyRunInput(ctx, tx, event); err != nil {
-			return err
-		}
 	case "run.started":
 		if _, err := tx.Exec(ctx, `
             UPDATE runs SET status = 'running', started_at = COALESCE(started_at, $2), version = version + 1
@@ -278,6 +275,12 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 		}
 		if _, err := tx.Exec(ctx, `UPDATE runtime_instances SET status = 'busy', last_event_at = $2, version = version + 1 WHERE id = $1`, event.RuntimeInstanceID, event.OccurredAt); err != nil {
 			return mapError("project runtime busy", err)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE messages SET status = 'applied', applied_at = COALESCE(applied_at, $2)
+            WHERE id = (SELECT trigger_message_id FROM runs WHERE id = $1)
+              AND status = 'dispatched'`, event.RunID, event.OccurredAt); err != nil {
+			return mapError("project applied trigger message", err)
 		}
 		if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'running', updated_at = now(), version = version + 1 WHERE id = $1 AND status <> 'terminated'`, event.BoxID); err != nil {
 			return mapError("project running box", err)
@@ -300,9 +303,6 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 		}
 		if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'idle', updated_at = now(), last_activity_at = now(), version = version + 1 WHERE id = $1 AND status <> 'terminated'`, event.BoxID); err != nil {
 			return mapError("release box after run", err)
-		}
-		if _, _, _, err := claimNextRunTx(ctx, tx, event.BoxID); err != nil {
-			return err
 		}
 	case "runtime.exited":
 		reason := payloadString(event.Payload, "reason", "terminalReason", "stopReason")
@@ -543,6 +543,12 @@ func projectAssistantMessage(ctx context.Context, tx pgx.Tx, event domain.BoxEve
 		return err
 	}
 	plainText := payloadString(event.Payload, "text", "content", "message")
+	if plainText == "" {
+		plainText, err = collectAssistantText(ctx, tx, event)
+		if err != nil {
+			return err
+		}
+	}
 	_, err = tx.Exec(ctx, `
         INSERT INTO messages(
             id, organization_id, box_id, run_id, box_seq, author_type,
@@ -552,6 +558,38 @@ func projectAssistantMessage(ctx context.Context, tx pgx.Tx, event domain.BoxEve
 		messageID, event.OrganizationID, event.BoxID, nullableUUID(event.RunID),
 		boxSeq, payload, nullableText(plainText), "event:"+event.EventID, event.OccurredAt)
 	return mapError("project assistant message", err)
+}
+
+func collectAssistantText(ctx context.Context, tx pgx.Tx, event domain.BoxEvent) (string, error) {
+	rows, err := tx.Query(ctx, `
+        SELECT payload
+        FROM box_events
+        WHERE box_id = $1 AND run_id = $2 AND event_type = 'message.delta' AND seq <= $3
+        ORDER BY seq`, event.BoxID, event.RunID, event.Seq)
+	if err != nil {
+		return "", mapError("read assistant message deltas", err)
+	}
+	defer rows.Close()
+	completedID := payloadString(event.Payload, "messageId")
+	var text strings.Builder
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return "", mapError("scan assistant message delta", err)
+		}
+		payload := json.RawMessage(raw)
+		if payloadString(payload, "channel") == "thinking" {
+			continue
+		}
+		if candidateID := payloadString(payload, "messageId"); completedID != "" && candidateID != "" && candidateID != completedID {
+			continue
+		}
+		text.WriteString(payloadString(payload, "text", "delta"))
+	}
+	if err := rows.Err(); err != nil {
+		return "", mapError("read assistant message deltas", err)
+	}
+	return text.String(), nil
 }
 
 func payloadString(payload json.RawMessage, keys ...string) string {

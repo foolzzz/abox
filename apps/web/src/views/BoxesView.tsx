@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api/client";
-import type { Agent, Box, Host, Workspace } from "../api/types";
+import type { Agent, Box, Host, ResourceRole, Workspace } from "../api/types";
 import { Icon } from "../components/Icon";
 import { useToast } from "../components/Toast";
 import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, Modal, PageHeader, RefreshButton, StatusChip, cx } from "../components/ui";
 import { useResource } from "../hooks/useResource";
+import { roleAtLeast, useAccess } from "../lib/access";
 import { formatDate } from "../lib/format";
 import { Link, navigate, useLocation } from "../lib/router";
 
@@ -16,6 +17,7 @@ interface BoxListData {
 }
 
 export function BoxesView() {
+  const { currentUser } = useAccess();
   const location = useLocation();
   const resource = useResource<BoxListData>(async (signal) => {
     const [boxes, agents, hosts, workspaces] = await Promise.all([
@@ -28,7 +30,8 @@ export function BoxesView() {
   }, []);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
-  const createOpen = new URLSearchParams(location.search).get("create") === "1";
+  const canCreate = roleAtLeast(currentUser?.role, "operator");
+  const createOpen = canCreate && new URLSearchParams(location.search).get("create") === "1";
 
   if (resource.loading) return <LoadingState label="Loading boxes" />;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
@@ -46,8 +49,9 @@ export function BoxesView() {
 
   return (
     <div className="page">
-      <PageHeader eyebrow="Live sessions" title="Boxes" description="Durable agent sessions bound to a host and workspace." actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} /><Button variant="primary" icon="plus" onClick={() => navigate("/boxes?create=1")}>New box</Button></>} />
+      <PageHeader eyebrow="Live sessions" title="Boxes" description="Durable agent sessions bound to a host and workspace, visible according to resource sharing." actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/boxes?create=1")}>New box</Button> : null}</>} />
       {resource.error ? <InlineAlert tone="warning">Box state could not be refreshed. Showing the last loaded snapshot.</InlineAlert> : null}
+      {!canCreate ? <p className="permission-caption">Your {currentUser?.role ?? "viewer"} role can open shared boxes in read-only mode. Operator access is required to create one.</p> : null}
       {data.boxes.length ? (
         <>
           <div className="list-toolbar">
@@ -67,12 +71,14 @@ export function BoxesView() {
             </section>
           ) : <EmptyState icon="search" title="No boxes match" description="Adjust the search or status filter to see more boxes." />}
         </>
-      ) : <EmptyState icon="box" title="No boxes yet" description="Create a box to pair an agent with a ready workspace." action={<Button variant="primary" icon="plus" onClick={() => navigate("/boxes?create=1")}>New box</Button>} />}
+      ) : <EmptyState icon="box" title="No boxes yet" description={canCreate ? "Create a box to pair an agent with a ready workspace." : "An operator must create a box and share it with you."} action={canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/boxes?create=1")}>New box</Button> : undefined} />}
       <CreateBoxModal
         open={createOpen}
         agents={data.agents}
         hosts={data.hosts}
         workspaces={data.workspaces}
+        currentUserId={currentUser?.id}
+        organizationAdmin={roleAtLeast(currentUser?.role, "admin")}
         onClose={() => navigate("/boxes", { replace: true })}
         onCreated={(box) => {
           resource.setData((current) => current ? { ...current, boxes: [box, ...current.boxes] } : current);
@@ -88,6 +94,8 @@ function CreateBoxModal({
   agents,
   hosts,
   workspaces,
+  currentUserId,
+  organizationAdmin,
   onClose,
   onCreated
 }: {
@@ -95,6 +103,8 @@ function CreateBoxModal({
   agents: Agent[];
   hosts: Host[];
   workspaces: Workspace[];
+  currentUserId?: string;
+  organizationAdmin: boolean;
   onClose: () => void;
   onCreated: (box: Box) => void;
 }) {
@@ -106,6 +116,9 @@ function CreateBoxModal({
   const [workspaceId, setWorkspaceId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
+  const [workspaceAccess, setWorkspaceAccess] = useState<ResourceRole>();
+  const [checkingWorkspaceAccess, setCheckingWorkspaceAccess] = useState(false);
+  const [workspaceAccessError, setWorkspaceAccessError] = useState<string>();
 
   useEffect(() => {
     if (!open) {
@@ -132,6 +145,35 @@ function CreateBoxModal({
       setWorkspaceId("");
     }
   }, [agentId, compatibleHosts, hostId]);
+  useEffect(() => {
+    setWorkspaceAccessError(undefined);
+    if (!open || !selectedWorkspaceId) {
+      setWorkspaceAccess(undefined);
+      setCheckingWorkspaceAccess(false);
+      return;
+    }
+    if (organizationAdmin) {
+      setWorkspaceAccess("owner");
+      setCheckingWorkspaceAccess(false);
+      return;
+    }
+    const controller = new AbortController();
+    setCheckingWorkspaceAccess(true);
+    api.getWorkspaceAcl(selectedWorkspaceId, controller.signal).then(
+      (entries) => {
+        if (controller.signal.aborted) return;
+        setWorkspaceAccess(entries.find((entry) => entry.userId === currentUserId)?.role ?? "viewer");
+        setCheckingWorkspaceAccess(false);
+      },
+      (requestError: unknown) => {
+        if (controller.signal.aborted) return;
+        setWorkspaceAccess(undefined);
+        setWorkspaceAccessError(errorMessage(requestError));
+        setCheckingWorkspaceAccess(false);
+      }
+    );
+    return () => controller.abort();
+  }, [currentUserId, open, organizationAdmin, selectedWorkspaceId]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -139,6 +181,7 @@ function CreateBoxModal({
       setStep(2);
       return;
     }
+    if (!organizationAdmin && workspaceAccess !== "owner" && workspaceAccess !== "operator") return;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -157,6 +200,7 @@ function CreateBoxModal({
   };
 
   const hasPlacement = compatibleHosts.length > 0 && readyWorkspaces.length > 0;
+  const canUseSelectedWorkspace = organizationAdmin || workspaceAccess === "owner" || workspaceAccess === "operator";
 
   return (
     <Modal open={open} onClose={onClose} title="Create a box" description="Launch a durable agent session in two steps." size="large">
@@ -175,12 +219,14 @@ function CreateBoxModal({
             {compatibleHosts.length === 0 ? <InlineAlert tone="warning">No online host supports {selectedAgent?.runtimeType.toUpperCase() ?? "this runtime"}.</InlineAlert> : null}
             <label className="field"><span>Host</span><select autoFocus required value={selectedHostId} onChange={(event) => { setHostId(event.target.value); setWorkspaceId(""); }}><option value="">Select a compatible host</option>{compatibleHosts.map((host) => <option value={host.id} key={host.id}>{host.name} · {host.runtimes.join(", ")}</option>)}</select></label>
             <label className="field"><span>Workspace</span><select required value={selectedWorkspaceId} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!selectedHostId}><option value="">Select a ready workspace</option>{readyWorkspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.path}</option>)}</select>{selectedHostId && readyWorkspaces.length === 0 ? <small className="field__error">This host has no ready workspaces.</small> : null}</label>
-            {selectedHost && selectedWorkspace ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{selectedWorkspace.name}</strong><small>{selectedHost.name} · {selectedWorkspace.path}</small></div><StatusChip status={selectedWorkspace.status} compact /></div> : null}
+            {selectedHost && selectedWorkspace ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{selectedWorkspace.name}</strong><small>{selectedHost.name} · {selectedWorkspace.path}</small></div>{checkingWorkspaceAccess ? <span className="spinner spinner--small" /> : <StatusChip status={workspaceAccess ?? selectedWorkspace.status} compact />}</div> : null}
+            {workspaceAccessError ? <InlineAlert>{workspaceAccessError}</InlineAlert> : null}
+            {selectedWorkspace && !checkingWorkspaceAccess && !workspaceAccessError && !canUseSelectedWorkspace ? <InlineAlert tone="warning">Your workspace role is viewer. An owner or operator must create boxes in this workspace.</InlineAlert> : null}
           </>
         )}
         <div className="modal__actions">
           {step === 1 ? <Button type="button" onClick={onClose}>Cancel</Button> : <Button type="button" icon="chevron" onClick={() => setStep(1)}>Back</Button>}
-          <Button type="submit" variant="primary" icon={step === 1 ? "arrow" : "spark"} busy={submitting} disabled={step === 1 ? !name.trim() || !selectedAgentId : !selectedHostId || !selectedWorkspaceId || !hasPlacement}>{step === 1 ? "Choose placement" : "Create box"}</Button>
+          <Button type="submit" variant="primary" icon={step === 1 ? "arrow" : "spark"} busy={submitting || checkingWorkspaceAccess} disabled={step === 1 ? !name.trim() || !selectedAgentId : !selectedHostId || !selectedWorkspaceId || !hasPlacement || !canUseSelectedWorkspace}>{step === 1 ? "Choose placement" : "Create box"}</Button>
         </div>
       </form>
     </Modal>

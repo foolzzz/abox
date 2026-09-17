@@ -89,6 +89,17 @@ func OpenStateStore(path string) (*StateStore, error) {
 	return store, nil
 }
 
+func (s *StateStore) WritePromptFile(boxID, content string) (string, error) {
+	if s == nil || boxID == "" {
+		return "", errors.New("box ID is required for prompt materialization")
+	}
+	path := filepath.Join(filepath.Dir(s.path), "prompts", boxID+".md")
+	if err := writeAtomic(path, []byte(content), 0o600); err != nil {
+		return "", fmt.Errorf("write system prompt: %w", err)
+	}
+	return path, nil
+}
+
 func (s *StateStore) Get(boxID string) (PersistedRuntime, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

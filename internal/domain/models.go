@@ -14,6 +14,42 @@ type User struct {
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
+type Member struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organizationId"`
+	Login          string    `json:"login"`
+	DisplayName    string    `json:"displayName"`
+	Role           string    `json:"role"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+type Team struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organizationId"`
+	Slug           string    `json:"slug"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type ResourceACL struct {
+	ID              string    `json:"id"`
+	OrganizationID  string    `json:"organizationId"`
+	ResourceID      string    `json:"resourceId"`
+	UserID          string    `json:"userId,omitempty"`
+	TeamID          string    `json:"teamId,omitempty"`
+	Role            string    `json:"role"`
+	CreatedByUserID string    `json:"createdByUserId"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+type ResourceACLEntryInput struct {
+	UserID string
+	TeamID string
+	Role   string
+}
+
 type Agent struct {
 	ID             string          `json:"id"`
 	OrganizationID string          `json:"organizationId"`

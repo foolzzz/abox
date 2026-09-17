@@ -1,5 +1,6 @@
 import { isObjectRecord } from "../lib/data";
 import type {
+  AccessControlEntry,
   Agent,
   Approval,
   ApprovalDecisionRequest,
@@ -9,9 +10,13 @@ import type {
   CreateBoxRequest,
   CreateWorkspaceRequest,
   Host,
+  Member,
   Message,
   Meta,
+  ReplaceAccessControlRequest,
   SendMessageRequest,
+  Team,
+  UpdateMemberRoleRequest,
   Workspace
 } from "./types";
 
@@ -84,6 +89,10 @@ function encode(segment: string): string {
 
 export const api = {
   getMeta: (signal?: AbortSignal) => request<Meta>("/meta", { signal }),
+  listMembers: (signal?: AbortSignal) => request<Member[]>("/members", { signal }),
+  updateMemberRole: (memberId: string, body: UpdateMemberRoleRequest, signal?: AbortSignal) =>
+    request<Member>(`/members/${encode(memberId)}/role`, { method: "PATCH", body, signal }),
+  listTeams: (signal?: AbortSignal) => request<Team[]>("/teams", { signal }),
   listAgents: (signal?: AbortSignal) => request<Agent[]>("/agents", { signal }),
   createAgent: (body: CreateAgentRequest, signal?: AbortSignal) =>
     request<Agent>("/agents", { method: "POST", body, signal }),
@@ -91,6 +100,10 @@ export const api = {
   listWorkspaces: (signal?: AbortSignal) => request<Workspace[]>("/workspaces", { signal }),
   createWorkspace: (body: CreateWorkspaceRequest, signal?: AbortSignal) =>
     request<Workspace>("/workspaces", { method: "POST", body, signal }),
+  getWorkspaceAcl: (workspaceId: string, signal?: AbortSignal) =>
+    request<AccessControlEntry[]>(`/workspaces/${encode(workspaceId)}/acl`, { signal }),
+  replaceWorkspaceAcl: (workspaceId: string, body: ReplaceAccessControlRequest, signal?: AbortSignal) =>
+    request<AccessControlEntry[]>(`/workspaces/${encode(workspaceId)}/acl`, { method: "PUT", body, signal }),
   listBoxes: (signal?: AbortSignal) => request<Box[]>("/boxes", { signal }),
   createBox: (body: CreateBoxRequest, signal?: AbortSignal) =>
     request<Box>("/boxes", { method: "POST", body, signal }),
@@ -105,6 +118,12 @@ export const api = {
       signal,
       headers: { "Idempotency-Key": idempotencyKey }
     }),
+  cancelMessage: (boxId: string, messageId: string, signal?: AbortSignal) =>
+    request<Message>(`/boxes/${encode(boxId)}/messages/${encode(messageId)}`, { method: "DELETE", signal }),
+  getBoxAcl: (boxId: string, signal?: AbortSignal) =>
+    request<AccessControlEntry[]>(`/boxes/${encode(boxId)}/acl`, { signal }),
+  replaceBoxAcl: (boxId: string, body: ReplaceAccessControlRequest, signal?: AbortSignal) =>
+    request<AccessControlEntry[]>(`/boxes/${encode(boxId)}/acl`, { method: "PUT", body, signal }),
   interruptBox: (boxId: string, signal?: AbortSignal) =>
     request<void>(`/boxes/${encode(boxId)}/interrupt`, { method: "POST", signal }),
   stopBox: (boxId: string, signal?: AbortSignal) =>

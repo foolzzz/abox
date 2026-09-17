@@ -43,6 +43,10 @@ export function humanize(value: string): string {
     .replace(/[._-]+/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
+export function initials(value: string): string {
+  return value.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
+}
+
 
 export function messageText(content: unknown, plainText?: string): string {
   if (plainText) return plainText;

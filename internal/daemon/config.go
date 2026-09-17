@@ -23,24 +23,26 @@ const (
 )
 
 // Config is the complete agentboxd configuration. Environment variables are
-// intentionally the only configuration source in Phase 1 so startup has one
-// deterministic precedence order.
+// intentionally the only configuration source so startup has one deterministic
+// precedence order.
 type Config struct {
-	ServerAddress     string
-	ServerTLS         bool
-	ServerName        string
-	HostID            string
-	EnrollmentToken   string
-	StateDirectory    string
-	WorkspaceRoots    []string
-	OMPBinary         string
-	HealthAddress     string
-	MaxActiveBoxes    int
-	MaxRunDuration    time.Duration
-	HeartbeatInterval time.Duration
-	ShutdownTimeout   time.Duration
-	RuntimeProbeTime  time.Duration
-	DaemonVersion     string
+	ServerAddress        string
+	ServerTLS            bool
+	ServerName           string
+	HostID               string
+	EnrollmentToken      string
+	StateDirectory       string
+	WorkspaceRoots       []string
+	OMPBinary            string
+	ClaudeBinary         string
+	ClaudePermissionMode string
+	HealthAddress        string
+	MaxActiveBoxes       int
+	MaxRunDuration       time.Duration
+	HeartbeatInterval    time.Duration
+	ShutdownTimeout      time.Duration
+	RuntimeProbeTime     time.Duration
+	DaemonVersion        string
 }
 
 func LoadConfig() (Config, error) {
@@ -50,19 +52,21 @@ func LoadConfig() (Config, error) {
 	}
 
 	config := Config{
-		ServerAddress:     env("AGENTBOX_SERVER_GRPC", defaultServerAddress),
-		HostID:            strings.TrimSpace(os.Getenv("AGENTBOX_HOST_ID")),
-		EnrollmentToken:   strings.TrimSpace(os.Getenv("AGENTBOX_ENROLLMENT_TOKEN")),
-		StateDirectory:    env("AGENTBOX_DAEMON_STATE_DIR", stateDirectory),
-		WorkspaceRoots:    splitPaths(env("AGENTBOX_WORKSPACE_ROOTS", env("AGENTBOX_WORKSPACE_ROOT", defaultWorkspaceRoot))),
-		OMPBinary:         env("AGENTBOX_OMP_BINARY", "omp"),
-		HealthAddress:     env("AGENTBOX_HEALTH_ADDR", defaultHealthAddress),
-		MaxActiveBoxes:    intEnv("AGENTBOX_MAX_ACTIVE_BOXES", defaultMaxActiveBoxes),
-		MaxRunDuration:    durationEnv("AGENTBOX_MAX_RUN_DURATION", defaultMaxRunDuration),
-		HeartbeatInterval: durationEnv("AGENTBOX_HEARTBEAT_INTERVAL", defaultHeartbeat),
-		ShutdownTimeout:   durationEnv("AGENTBOX_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
-		RuntimeProbeTime:  durationEnv("AGENTBOX_RUNTIME_PROBE_TIMEOUT", defaultRuntimeProbeTime),
-		ServerName:        strings.TrimSpace(os.Getenv("AGENTBOX_SERVER_NAME")),
+		ServerAddress:        env("AGENTBOX_SERVER_GRPC", defaultServerAddress),
+		HostID:               strings.TrimSpace(os.Getenv("AGENTBOX_HOST_ID")),
+		EnrollmentToken:      strings.TrimSpace(os.Getenv("AGENTBOX_ENROLLMENT_TOKEN")),
+		StateDirectory:       env("AGENTBOX_DAEMON_STATE_DIR", stateDirectory),
+		WorkspaceRoots:       splitPaths(env("AGENTBOX_WORKSPACE_ROOTS", env("AGENTBOX_WORKSPACE_ROOT", defaultWorkspaceRoot))),
+		OMPBinary:            env("AGENTBOX_OMP_BINARY", "omp"),
+		ClaudeBinary:         env("AGENTBOX_CLAUDE_BINARY", "claude"),
+		ClaudePermissionMode: env("AGENTBOX_CLAUDE_PERMISSION_MODE", "dontAsk"),
+		HealthAddress:        env("AGENTBOX_HEALTH_ADDR", defaultHealthAddress),
+		MaxActiveBoxes:       intEnv("AGENTBOX_MAX_ACTIVE_BOXES", defaultMaxActiveBoxes),
+		MaxRunDuration:       durationEnv("AGENTBOX_MAX_RUN_DURATION", defaultMaxRunDuration),
+		HeartbeatInterval:    durationEnv("AGENTBOX_HEARTBEAT_INTERVAL", defaultHeartbeat),
+		ShutdownTimeout:      durationEnv("AGENTBOX_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
+		RuntimeProbeTime:     durationEnv("AGENTBOX_RUNTIME_PROBE_TIMEOUT", defaultRuntimeProbeTime),
+		ServerName:           strings.TrimSpace(os.Getenv("AGENTBOX_SERVER_NAME")),
 	}
 	config.ServerTLS, err = boolEnv("AGENTBOX_SERVER_TLS", false)
 	if err != nil {
@@ -86,6 +90,12 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.OMPBinary) == "" {
 		return errors.New("AGENTBOX_OMP_BINARY is required")
+	}
+	if strings.TrimSpace(c.ClaudeBinary) == "" {
+		return errors.New("AGENTBOX_CLAUDE_BINARY is required")
+	}
+	if strings.TrimSpace(c.ClaudePermissionMode) == "" {
+		return errors.New("AGENTBOX_CLAUDE_PERMISSION_MODE is required")
 	}
 	if c.MaxActiveBoxes <= 0 || c.MaxActiveBoxes > 256 {
 		return errors.New("AGENTBOX_MAX_ACTIVE_BOXES must be between 1 and 256")

@@ -63,12 +63,16 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
 	}
 	var result domain.Box
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		if _, err := requireRole(ctx, tx, user, "owner", "admin", "operator"); err != nil {
+		allowed, err := canOperateWorkspace(ctx, tx, user, input.WorkspaceID)
+		if err != nil {
 			return err
+		}
+		if !allowed {
+			return fmt.Errorf("%w: workspace operator access required", storepkg.ErrForbidden)
 		}
 		var agentVersionID, runtimeType string
 		var idleTimeout int
-		err := tx.QueryRow(ctx, `
+		err = tx.QueryRow(ctx, `
             SELECT av.id, av.runtime_type, av.idle_timeout_seconds
             FROM agents a
             JOIN agent_versions av ON av.id = a.published_version_id AND av.agent_id = a.id
@@ -128,13 +132,6 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
 		}
 		if workspaceHostID != input.HostID || workspaceStatus != "ready" {
 			return fmt.Errorf("%w: workspace is not ready on the selected host", storepkg.ErrInvalidState)
-		}
-		allowed, err := canOperateWorkspace(ctx, tx, user, input.WorkspaceID)
-		if err != nil {
-			return err
-		}
-		if !allowed {
-			return fmt.Errorf("%w: workspace operator access required", storepkg.ErrForbidden)
 		}
 
 		boxID, err := newUUIDv7()

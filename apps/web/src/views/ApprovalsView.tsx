@@ -5,13 +5,17 @@ import { Icon } from "../components/Icon";
 import { useToast } from "../components/Toast";
 import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, PageHeader, RefreshButton, StatusChip } from "../components/ui";
 import { useResource } from "../hooks/useResource";
+import { roleAtLeast, useAccess } from "../lib/access";
 import { compactJson, relativeTime } from "../lib/format";
 import { Link } from "../lib/router";
 
 export function ApprovalsView() {
-  const resource = useResource((signal) => api.listApprovals(signal), []);
+  const { currentUser, loading: accessLoading } = useAccess();
+  const canReview = roleAtLeast(currentUser?.role, "operator");
+  const resource = useResource((signal) => canReview ? api.listApprovals(signal) : Promise.resolve([]), [canReview]);
 
-  if (resource.loading) return <LoadingState label="Loading approval queue" />;
+  if (accessLoading || resource.loading) return <LoadingState label="Loading approval queue" />;
+  if (!canReview) return <div className="page"><PageHeader eyebrow="Human in the loop" title="Approvals" description="Sensitive tool requests require an operator decision." /><EmptyState icon="approval" title="Operator access required" description={`Your ${currentUser?.role ?? "viewer"} role is read-only. An operator, admin, or owner can review approvals.`} /></div>;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
 
   const approvals = resource.data ?? [];
@@ -37,7 +41,7 @@ export function ApprovalsView() {
   );
 }
 
-export function ApprovalCard({ approval, onResolved, compact = false }: { approval: Approval; onResolved: (approval: Approval) => void; compact?: boolean }) {
+export function ApprovalCard({ approval, onResolved, compact = false, canDecide = true }: { approval: Approval; onResolved: (approval: Approval) => void; compact?: boolean; canDecide?: boolean }) {
   const { notify } = useToast();
   const [deciding, setDeciding] = useState<"approved" | "denied">();
   const [error, setError] = useState<string>();
@@ -67,8 +71,7 @@ export function ApprovalCard({ approval, onResolved, compact = false }: { approv
       {approval.payload && Object.keys(approval.payload).length ? <details className="payload-details"><summary>Request payload</summary><pre>{compactJson(approval.payload)}</pre></details> : null}
       {error ? <InlineAlert>{error}</InlineAlert> : null}
       <div className="approval-card__actions">
-        <Button icon="deny" variant="danger" busy={deciding === "denied"} disabled={Boolean(deciding) || expired} onClick={() => void decide("denied")}>Deny</Button>
-        <Button icon="check" variant="primary" busy={deciding === "approved"} disabled={Boolean(deciding) || expired} onClick={() => void decide("approved")}>Approve</Button>
+        {canDecide ? <><Button icon="deny" variant="danger" busy={deciding === "denied"} disabled={Boolean(deciding) || expired} onClick={() => void decide("denied")}>Deny</Button><Button icon="check" variant="primary" busy={deciding === "approved"} disabled={Boolean(deciding) || expired} onClick={() => void decide("approved")}>Approve</Button></> : <StatusChip status="read_only" compact />}
         {expired ? <StatusChip status="expired" compact /> : null}
       </div>
     </article>

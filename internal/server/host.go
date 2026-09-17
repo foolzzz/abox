@@ -245,7 +245,7 @@ func (s *Server) authenticateHost(ctx context.Context, hello *hostv1.HostHello) 
 		if hostID == "" || !s.validHostCredential(hostID, credential) {
 			return domain.Host{}, "", status.Error(codes.Unauthenticated, "invalid host credential")
 		}
-		storedHost, err := s.store.GetHost(ctx, s.developmentUser.OrganizationID, hostID)
+		storedHost, err := s.store.GetHostForOrganization(ctx, s.developmentUser.OrganizationID, hostID)
 		if err != nil {
 			return domain.Host{}, "", storeGRPCStatus("load enrolled host", err)
 		}
@@ -490,11 +490,12 @@ func (s *Server) processRuntimeSnapshot(ctx context.Context, hostID, frameID str
 		if err != nil {
 			return status.Error(codes.Internal, "runtime snapshot could not be encoded")
 		}
-		daemonEventID := fmt.Sprintf("snapshot:%s:%d:%s", frameID, index, process.GetRuntimeInstanceId())
+		daemonEventKey := fmt.Sprintf("snapshot:%s:%d:%s", frameID, index, process.GetRuntimeInstanceId())
+		daemonEventID := stableHostEventID(hostID, daemonEventKey)
 		event := domain.BoxEvent{
 			OrganizationID:    box.OrganizationID,
 			BoxID:             box.ID,
-			EventID:           stableHostEventID(hostID, daemonEventID),
+			EventID:           daemonEventID,
 			HostID:            hostID,
 			DaemonEventID:     daemonEventID,
 			RuntimeInstanceID: process.GetRuntimeInstanceId(),
@@ -523,11 +524,12 @@ func (s *Server) processArtifact(ctx context.Context, hostID, frameID string, ar
 	if err != nil {
 		return status.Error(codes.Internal, "artifact metadata could not be encoded")
 	}
-	daemonEventID := "artifact:" + frameID + ":" + artifact.GetArtifactId()
+	daemonEventKey := "artifact:" + frameID + ":" + artifact.GetArtifactId()
+	daemonEventID := stableHostEventID(hostID, daemonEventKey)
 	return s.appendApplyBroadcast(ctx, domain.BoxEvent{
 		OrganizationID: box.OrganizationID,
 		BoxID:          box.ID,
-		EventID:        stableHostEventID(hostID, daemonEventID),
+		EventID:        daemonEventID,
 		HostID:         hostID,
 		DaemonEventID:  daemonEventID,
 		RunID:          artifact.GetRunId(),

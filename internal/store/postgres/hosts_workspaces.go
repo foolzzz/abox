@@ -192,7 +192,14 @@ func (s *Store) TouchHost(ctx context.Context, hostID, daemonInstanceID string, 
 	return fmt.Errorf("%w: stale daemon instance", storepkg.ErrConflict)
 }
 
-func (s *Store) GetHost(ctx context.Context, organizationID, id string) (domain.Host, error) {
+func (s *Store) GetHost(ctx context.Context, user domain.User, id string) (domain.Host, error) {
+	if _, err := requireMembership(ctx, s.pool, user); err != nil {
+		return domain.Host{}, err
+	}
+	return getHost(ctx, s.pool, user.OrganizationID, id)
+}
+
+func (s *Store) GetHostForOrganization(ctx context.Context, organizationID, id string) (domain.Host, error) {
 	return getHost(ctx, s.pool, organizationID, id)
 }
 
@@ -337,7 +344,18 @@ func (s *Store) CreateWorkspace(ctx context.Context, user domain.User, input dom
 	return result, err
 }
 
-func (s *Store) GetWorkspace(ctx context.Context, organizationID, id string) (domain.Workspace, error) {
+func (s *Store) GetWorkspace(ctx context.Context, user domain.User, id string) (domain.Workspace, error) {
+	allowed, err := canReadWorkspace(ctx, s.pool, user, id)
+	if err != nil {
+		return domain.Workspace{}, err
+	}
+	if !allowed {
+		return domain.Workspace{}, fmt.Errorf("%w: workspace read access required", storepkg.ErrForbidden)
+	}
+	return getWorkspace(ctx, s.pool, user.OrganizationID, id)
+}
+
+func (s *Store) GetWorkspaceForOrganization(ctx context.Context, organizationID, id string) (domain.Workspace, error) {
 	return getWorkspace(ctx, s.pool, organizationID, id)
 }
 

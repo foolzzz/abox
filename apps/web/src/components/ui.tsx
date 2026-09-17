@@ -23,13 +23,13 @@ export function Button({ variant = "secondary", icon, busy, children, className,
 }
 
 export function StatusChip({ status, compact = false }: { status: string; compact?: boolean }) {
-  const tone = ["online", "ready", "idle", "succeeded", "approved", "completed", "open"].includes(status)
+  const tone = ["online", "ready", "idle", "succeeded", "approved", "completed", "open", "available", "owner"].includes(status)
     ? "positive"
-    : ["running", "starting", "dispatching", "provisioning", "connecting"].includes(status)
+    : ["running", "starting", "dispatching", "provisioning", "connecting", "operator", "admin"].includes(status)
       ? "active"
-      : ["waiting_approval", "pending", "enrolling", "draining", "retrying"].includes(status)
+      : ["waiting_approval", "pending", "enrolling", "draining", "retrying", "read_only"].includes(status)
         ? "warning"
-        : ["error", "failed", "offline", "revoked", "denied", "critical", "closed"].includes(status)
+        : ["error", "failed", "offline", "revoked", "denied", "critical", "closed", "unavailable", "cancelled"].includes(status)
           ? "negative"
           : "neutral";
   return (

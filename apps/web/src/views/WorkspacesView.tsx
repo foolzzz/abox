@@ -1,20 +1,25 @@
 import { useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api/client";
 import type { Workspace } from "../api/types";
+import { AccessControlDialog } from "../components/AccessControlDialog";
 import { Icon } from "../components/Icon";
 import { useToast } from "../components/Toast";
 import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, Modal, PageHeader, RefreshButton, StatusChip } from "../components/ui";
 import { useResource } from "../hooks/useResource";
+import { roleAtLeast, useAccess } from "../lib/access";
 import { formatDate } from "../lib/format";
 import { navigate, useLocation } from "../lib/router";
 
 export function WorkspacesView() {
+  const { currentUser } = useAccess();
   const location = useLocation();
   const resources = useResource(async (signal) => {
     const [workspaces, hosts] = await Promise.all([api.listWorkspaces(signal), api.listHosts(signal)]);
     return { workspaces, hosts };
   }, []);
-  const createOpen = new URLSearchParams(location.search).get("create") === "1";
+  const [sharingWorkspace, setSharingWorkspace] = useState<Workspace>();
+  const canCreate = roleAtLeast(currentUser?.role, "admin");
+  const createOpen = canCreate && new URLSearchParams(location.search).get("create") === "1";
 
   if (resources.loading) return <LoadingState label="Loading workspaces" />;
   if (resources.error && !resources.data) return <ErrorState error={resources.error} retry={resources.reload} />;
@@ -24,12 +29,13 @@ export function WorkspacesView() {
 
   return (
     <div className="page">
-      <PageHeader eyebrow="Execution context" title="Workspaces" description="Host directories made available to agent boxes." actions={<><RefreshButton refreshing={resources.refreshing} onClick={resources.reload} /><Button variant="primary" icon="plus" onClick={() => navigate("/workspaces?create=1")}>New workspace</Button></>} />
+      <PageHeader eyebrow="Execution context" title="Workspaces" description="Host directories made available to agent boxes, with explicit owner, operator, and viewer access." actions={<><RefreshButton refreshing={resources.refreshing} onClick={resources.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/workspaces?create=1")}>New workspace</Button> : null}</>} />
       {resources.error ? <InlineAlert tone="warning">The list could not be refreshed. Showing the last loaded data.</InlineAlert> : null}
+      {!canCreate ? <p className="permission-caption">Your {currentUser?.role ?? "viewer"} role can use shared workspaces. An organization admin is required to register one.</p> : null}
       {data.workspaces.length ? (
         <section className="table-panel" aria-label="Registered workspaces">
           <div className="data-table data-table--workspaces" role="table">
-            <div className="data-table__header" role="row"><span role="columnheader">Workspace</span><span role="columnheader">Host</span><span role="columnheader">Path</span><span role="columnheader">State</span><span role="columnheader">Created</span></div>
+            <div className="data-table__header" role="row"><span role="columnheader">Workspace</span><span role="columnheader">Host</span><span role="columnheader">Path</span><span role="columnheader">State</span><span role="columnheader">Created</span><span role="columnheader">Sharing</span></div>
             {data.workspaces.map((workspace) => (
               <div className="data-table__row" role="row" key={workspace.id}>
                 <span role="cell" data-label="Workspace"><span className="table-primary"><span className="resource-icon resource-icon--workspace"><Icon name="workspace" /></span><strong>{workspace.name}</strong></span></span>
@@ -37,11 +43,12 @@ export function WorkspacesView() {
                 <span role="cell" data-label="Path" className="mono table-path">{workspace.path}</span>
                 <span role="cell" data-label="State"><StatusChip status={workspace.status} compact /></span>
                 <span role="cell" data-label="Created">{formatDate(workspace.createdAt)}</span>
+                <span role="cell" data-label="Sharing"><button className="icon-button" type="button" title={`Sharing for ${workspace.name}`} aria-label={`Open sharing for ${workspace.name}`} onClick={() => setSharingWorkspace(workspace)}><Icon name="share" /></button></span>
               </div>
             ))}
           </div>
         </section>
-      ) : <EmptyState icon="workspace" title="No workspaces registered" description="Register a directory on an online host before creating a box." action={<Button variant="primary" icon="plus" onClick={() => navigate("/workspaces?create=1")}>New workspace</Button>} />}
+      ) : <EmptyState icon="workspace" title="No workspaces registered" description={canCreate ? "Register a directory on an online host before creating a box." : "An organization admin must register a directory before boxes can be created."} action={canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/workspaces?create=1")}>New workspace</Button> : undefined} />}
       <CreateWorkspaceModal
         open={createOpen}
         hosts={data.hosts}
@@ -51,6 +58,7 @@ export function WorkspacesView() {
           navigate("/workspaces", { replace: true });
         }}
       />
+      {sharingWorkspace ? <AccessControlDialog open resourceKind="workspace" resourceId={sharingWorkspace.id} resourceName={sharingWorkspace.name} onClose={() => setSharingWorkspace(undefined)} onSaved={resources.reload} /> : null}
     </div>
   );
 }

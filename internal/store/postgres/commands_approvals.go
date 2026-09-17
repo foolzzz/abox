@@ -24,10 +24,46 @@ const approvalSelect = `
            a.risk_level, a.status, a.requested_payload, a.expires_at
     FROM approvals a`
 
-func (s *Store) CreateHostCommand(ctx context.Context, command domain.HostCommand) (domain.HostCommand, error) {
+func (s *Store) CreateHostCommand(ctx context.Context, user domain.User, command domain.HostCommand) (domain.HostCommand, error) {
+	if command.BoxID == "" || command.CommandType == "" || strings.TrimSpace(command.IdempotencyKey) == "" {
+		return domain.HostCommand{}, fmt.Errorf("%w: user command requires box, command type, and idempotency key", storepkg.ErrInvalidState)
+	}
 	var result domain.HostCommand
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		var err error
+		var organizationID, hostID string
+		if err := tx.QueryRow(ctx, `
+            SELECT organization_id, host_id FROM boxes
+            WHERE id = $1 AND organization_id = $2
+            FOR UPDATE`, command.BoxID, user.OrganizationID).Scan(&organizationID, &hostID); err != nil {
+			return mapError("lock command box", err)
+		}
+		allowed, err := canOperateBox(ctx, tx, user, command.BoxID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return fmt.Errorf("%w: box operator access required", storepkg.ErrForbidden)
+		}
+		if command.OrganizationID != "" && command.OrganizationID != organizationID {
+			return fmt.Errorf("%w: command organization does not own box", storepkg.ErrConflict)
+		}
+		if command.HostID != "" && command.HostID != hostID {
+			return fmt.Errorf("%w: command host does not own box", storepkg.ErrConflict)
+		}
+		command.OrganizationID = organizationID
+		command.HostID = hostID
+		existing, err := scanHostCommand(tx.QueryRow(ctx, hostCommandSelect+`
+            WHERE c.host_id = $1 AND c.idempotency_key = $2`, hostID, command.IdempotencyKey))
+		if err == nil {
+			if existing.BoxID != command.BoxID || existing.CommandType != command.CommandType {
+				return fmt.Errorf("%w: idempotency key was used for a different command", storepkg.ErrConflict)
+			}
+			result = existing
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return mapError("check idempotent user command", err)
+		}
 		if command.CommandType == "runtime.start" {
 			command, err = prepareRuntimeStartCommandTx(ctx, tx, command)
 			if err != nil {
@@ -35,7 +71,15 @@ func (s *Store) CreateHostCommand(ctx context.Context, command domain.HostComman
 			}
 		}
 		result, err = insertHostCommandTx(ctx, tx, command)
-		return err
+		if err != nil {
+			return err
+		}
+		if err := insertAudit(ctx, tx, organizationID, "user", user.ID, "",
+			"box.command_created", "box", command.BoxID,
+			map[string]any{"commandId": result.ID, "commandType": result.CommandType}); err != nil {
+			return err
+		}
+		return nil
 	})
 	return result, err
 }
@@ -346,11 +390,13 @@ func (s *Store) ListApprovals(ctx context.Context, user domain.User) ([]domain.A
               OR EXISTS (
                   SELECT 1 FROM box_acl ba
                   WHERE ba.box_id = b.id AND ba.user_id = $2
+                    AND ba.role IN ('owner','operator')
               )
               OR EXISTS (
                   SELECT 1 FROM box_acl ba
                   JOIN team_members tm ON tm.team_id = ba.team_id AND tm.organization_id = ba.organization_id
                   WHERE ba.box_id = b.id AND tm.user_id = $2
+                    AND ba.role IN ('owner','operator')
               )
           )
         ORDER BY a.expires_at, a.id`, user.OrganizationID, user.ID, role)
@@ -380,9 +426,6 @@ func (s *Store) ResolveApproval(ctx context.Context, user domain.User, approvalI
 	var result domain.Approval
 	var resultCommand *domain.HostCommand
 	err = s.withTx(ctx, func(tx pgx.Tx) error {
-		if _, err := requireRole(ctx, tx, user, "owner", "admin", "operator"); err != nil {
-			return err
-		}
 		var organizationID, boxID, runID, runtimeID, hostID, status string
 		var expiresAtExpired bool
 		err := tx.QueryRow(ctx, `

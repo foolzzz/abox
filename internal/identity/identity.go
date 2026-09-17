@@ -130,9 +130,9 @@ func (e *ServeHeaderExtractor) Extract(request *http.Request) (Principal, error)
 	}, nil
 }
 
-// DevelopmentExtractor returns one configured identity; it never consumes an
-// identity from request headers. It must be explicitly enabled and is limited
-// to a trusted development source, normally loopback.
+// DevelopmentExtractor returns the configured identity by default. On a
+// trusted development source it may accept X-AgentBox-Dev-User to exercise
+// multi-user flows locally. It must never be enabled on a non-loopback peer.
 type DevelopmentExtractor struct {
 	enabled   bool
 	principal Principal
@@ -166,7 +166,19 @@ func (e *DevelopmentExtractor) Extract(request *http.Request) (Principal, error)
 	if !e.trust.Trusted(peer) {
 		return Principal{}, fmt.Errorf("%w: development identity refused for peer %s", ErrUntrustedSource, peer)
 	}
-	return e.principal, nil
+	principal := e.principal
+	if login, headerErr := singleHeader(request.Header, "X-AgentBox-Dev-User", false, 320); headerErr != nil {
+		return Principal{}, headerErr
+	} else if login != "" {
+		principal.LoginName = login
+		principal.DisplayName = login
+		if before, _, ok := strings.Cut(login, "@"); ok && before != "" {
+			principal.DisplayName = before
+		}
+		principal.UserID = ""
+	}
+	principal.Source = "development"
+	return principal, nil
 }
 
 type FallbackExtractor struct {

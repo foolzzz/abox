@@ -82,6 +82,130 @@ func (s *Server) requireRole(minimum roleLevel) func(http.Handler) http.Handler 
 	}
 }
 
+func (s *Server) handleListMembers(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	members, err := s.store.ListMembers(request.Context(), user)
+	if err != nil {
+		s.writeStoreError(writer, "list members", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, members)
+}
+
+func (s *Server) handleUpdateMemberRole(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Role string `json:"role"`
+	}
+	if err := decodeJSON(request, &body); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if levelForRole(body.Role) == 0 {
+		writeProblem(writer, http.StatusBadRequest, "invalid_request", "role must be owner, admin, operator, or viewer")
+		return
+	}
+	user, _ := requestUser(request)
+	member, err := s.store.UpdateMemberRole(request.Context(), user, chi.URLParam(request, "memberID"), body.Role)
+	if err != nil {
+		s.writeStoreError(writer, "update member role", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, member)
+}
+
+func (s *Server) handleListTeams(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	teams, err := s.store.ListTeams(request.Context(), user)
+	if err != nil {
+		s.writeStoreError(writer, "list teams", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, teams)
+}
+
+type aclEntryRequest struct {
+	UserID string `json:"userId"`
+	TeamID string `json:"teamId"`
+	Role   string `json:"role"`
+}
+
+func decodeACLReplacement(request *http.Request) ([]domain.ResourceACLEntryInput, error) {
+	var body struct {
+		Entries *[]aclEntryRequest `json:"entries"`
+	}
+	if err := decodeJSON(request, &body); err != nil {
+		return nil, err
+	}
+	if body.Entries == nil {
+		return nil, errors.New("entries is required")
+	}
+	result := make([]domain.ResourceACLEntryInput, len(*body.Entries))
+	for _, entry := range *body.Entries {
+		if (strings.TrimSpace(entry.UserID) == "") == (strings.TrimSpace(entry.TeamID) == "") {
+			return nil, errors.New("each entry must identify exactly one userId or teamId")
+		}
+		switch strings.ToLower(strings.TrimSpace(entry.Role)) {
+		case "owner", "operator", "viewer":
+		default:
+			return nil, errors.New("entry role must be owner, operator, or viewer")
+		}
+	}
+	for index, entry := range *body.Entries {
+		result[index] = domain.ResourceACLEntryInput{UserID: entry.UserID, TeamID: entry.TeamID, Role: entry.Role}
+	}
+	return result, nil
+}
+
+func (s *Server) handleListWorkspaceACL(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	entries, err := s.store.ListWorkspaceACL(request.Context(), user, chi.URLParam(request, "workspaceID"))
+	if err != nil {
+		s.writeStoreError(writer, "list workspace acl", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, entries)
+}
+
+func (s *Server) handleReplaceWorkspaceACL(writer http.ResponseWriter, request *http.Request) {
+	entries, err := decodeACLReplacement(request)
+	if err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	user, _ := requestUser(request)
+	result, err := s.store.ReplaceWorkspaceACL(request.Context(), user, chi.URLParam(request, "workspaceID"), entries)
+	if err != nil {
+		s.writeStoreError(writer, "replace workspace acl", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
+func (s *Server) handleListBoxACL(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	entries, err := s.store.ListBoxACL(request.Context(), user, chi.URLParam(request, "boxID"))
+	if err != nil {
+		s.writeStoreError(writer, "list box acl", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, entries)
+}
+
+func (s *Server) handleReplaceBoxACL(writer http.ResponseWriter, request *http.Request) {
+	entries, err := decodeACLReplacement(request)
+	if err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	user, _ := requestUser(request)
+	result, err := s.store.ReplaceBoxACL(request.Context(), user, chi.URLParam(request, "boxID"), entries)
+	if err != nil {
+		s.writeStoreError(writer, "replace box acl", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, result)
+}
+
 func (s *Server) handleListAgents(writer http.ResponseWriter, request *http.Request) {
 	user, _ := requestUser(request)
 	agents, err := s.store.ListAgents(request.Context(), user)
@@ -147,7 +271,7 @@ func (s *Server) handleListHosts(writer http.ResponseWriter, request *http.Reque
 
 func (s *Server) handleGetHost(writer http.ResponseWriter, request *http.Request) {
 	user, _ := requestUser(request)
-	host, err := s.store.GetHost(request.Context(), user.OrganizationID, chi.URLParam(request, "hostID"))
+	host, err := s.store.GetHost(request.Context(), user, chi.URLParam(request, "hostID"))
 	if err != nil {
 		s.writeStoreError(writer, "get host", err)
 		return
@@ -167,7 +291,7 @@ func (s *Server) handleListWorkspaces(writer http.ResponseWriter, request *http.
 
 func (s *Server) handleGetWorkspace(writer http.ResponseWriter, request *http.Request) {
 	user, _ := requestUser(request)
-	workspace, err := s.store.GetWorkspace(request.Context(), user.OrganizationID, chi.URLParam(request, "workspaceID"))
+	workspace, err := s.store.GetWorkspace(request.Context(), user, chi.URLParam(request, "workspaceID"))
 	if err != nil {
 		s.writeStoreError(writer, "get workspace", err)
 		return
@@ -313,6 +437,18 @@ func (s *Server) handleSendMessage(writer http.ResponseWriter, request *http.Req
 	writeJSON(writer, http.StatusAccepted, toMessageResponse(message))
 }
 
+func (s *Server) handleCancelQueuedMessage(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	message, err := s.store.CancelQueuedMessage(
+		request.Context(), user, chi.URLParam(request, "boxID"), chi.URLParam(request, "messageID"),
+	)
+	if err != nil {
+		s.writeStoreError(writer, "cancel queued message", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, toMessageResponse(message))
+}
+
 type messageResponse struct {
 	ID         string          `json:"id"`
 	BoxID      string          `json:"boxId"`
@@ -364,15 +500,11 @@ func (s *Server) handleResume(writer http.ResponseWriter, request *http.Request)
 		s.writeStoreError(writer, "get box for resume", err)
 		return
 	}
-	if !mayOperateBox(user, box) {
-		writeProblem(writer, http.StatusForbidden, "forbidden", "the current user cannot operate this box")
-		return
-	}
 	if box.Status != domain.BoxHibernated && box.Status != domain.BoxError {
 		writeProblem(writer, http.StatusConflict, "conflict", "box is not resumable in its current state")
 		return
 	}
-	workspace, err := s.store.GetWorkspace(request.Context(), user.OrganizationID, box.WorkspaceID)
+	workspace, err := s.store.GetWorkspaceForOrganization(request.Context(), user.OrganizationID, box.WorkspaceID)
 	if err != nil {
 		s.writeStoreError(writer, "get workspace for resume", err)
 		return
@@ -409,10 +541,6 @@ func (s *Server) handleBoxCommand(writer http.ResponseWriter, request *http.Requ
 		s.writeStoreError(writer, "get box for command", err)
 		return
 	}
-	if !mayOperateBox(user, box) {
-		writeProblem(writer, http.StatusForbidden, "forbidden", "the current user cannot operate this box")
-		return
-	}
 	if len(spec.allowed) > 0 && !containsBoxStatus(spec.allowed, box.Status) {
 		writeProblem(writer, http.StatusConflict, "conflict", "box cannot accept this command in its current state")
 		return
@@ -425,11 +553,12 @@ func (s *Server) handleBoxCommand(writer http.ResponseWriter, request *http.Requ
 }
 
 func (s *Server) persistBoxCommand(writer http.ResponseWriter, request *http.Request, box domain.Box, commandType string, payload json.RawMessage, runtimeInstanceID string) {
+	user, _ := requestUser(request)
 	key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
 	if key == "" {
 		key = fmt.Sprintf("%s:%s:%d", commandType, box.ID, box.Version)
 	}
-	command, err := s.store.CreateHostCommand(request.Context(), domain.HostCommand{
+	command, err := s.store.CreateHostCommand(request.Context(), user, domain.HostCommand{
 		ID:                uuid.NewString(),
 		OrganizationID:    box.OrganizationID,
 		HostID:            box.HostID,
@@ -446,10 +575,6 @@ func (s *Server) persistBoxCommand(writer http.ResponseWriter, request *http.Req
 	}
 	s.dispatch(&command)
 	writeJSON(writer, http.StatusAccepted, command)
-}
-
-func mayOperateBox(user domain.User, box domain.Box) bool {
-	return levelForRole(user.Role) >= roleAdmin || box.OwnerUserID == user.ID
 }
 
 func containsBoxStatus(statuses []domain.BoxStatus, current domain.BoxStatus) bool {

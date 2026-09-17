@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { api, errorMessage } from "../api/client";
+import { api, ApiError, errorMessage } from "../api/client";
 import { streamBoxEvents, type StreamState } from "../api/sse";
-import type { Agent, AgentEvent, Approval, BoxSnapshot, BoxStatus, DeliveryMode, Host, Message, Workspace } from "../api/types";
+import type { AccessControlEntry, Agent, AgentEvent, Approval, BoxSnapshot, BoxStatus, DeliveryMode, Host, Message, Workspace } from "../api/types";
+import { AccessControlDialog } from "../components/AccessControlDialog";
 import { Icon } from "../components/Icon";
 import { useToast } from "../components/Toast";
 import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, Modal, StatusChip, cx } from "../components/ui";
 import { useResource } from "../hooks/useResource";
+import { roleAtLeast, useAccess } from "../lib/access";
 import { isObjectRecord } from "../lib/data";
-import { compactJson, extractText, formatTime, humanize, messageText, relativeTime } from "../lib/format";
+import { compactJson, extractText, formatTime, humanize, initials, messageText, relativeTime } from "../lib/format";
 import { Link } from "../lib/router";
 import { ApprovalCard } from "./ApprovalsView";
 
@@ -18,6 +20,7 @@ interface BoxDetailData {
   agents: Agent[];
   hosts: Host[];
   workspaces: Workspace[];
+  acl: AccessControlEntry[];
 }
 
 interface LiveMessage {
@@ -44,17 +47,19 @@ interface ActivityItem {
 }
 
 export function BoxDetailView({ boxId }: { boxId: string }) {
+  const { currentUser } = useAccess();
   const { notify } = useToast();
   const resource = useResource<BoxDetailData>(async (signal) => {
-    const [snapshot, messages, approvals, agents, hosts, workspaces] = await Promise.all([
+    const [snapshot, messages, approvals, agents, hosts, workspaces, acl] = await Promise.all([
       api.getBox(boxId, signal),
       api.listMessages(boxId, signal),
-      api.listApprovals(signal),
+      api.listApprovals(signal).catch((requestError: unknown) => requestError instanceof ApiError && requestError.status === 403 ? [] : Promise.reject(requestError)),
       api.listAgents(signal),
       api.listHosts(signal),
-      api.listWorkspaces(signal)
+      api.listWorkspaces(signal),
+      api.getBoxAcl(boxId, signal)
     ]);
-    return { snapshot, messages, approvals, agents, hosts, workspaces };
+    return { snapshot, messages, approvals, agents, hosts, workspaces, acl };
   }, [boxId]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [streamState, setStreamState] = useState<StreamState>("connecting");
@@ -67,6 +72,7 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
   const [controlAction, setControlAction] = useState<"interrupt" | "stop" | "resume">();
   const [controlError, setControlError] = useState<string>();
   const [confirmStop, setConfirmStop] = useState(false);
+  const [sharingOpen, setSharingOpen] = useState(false);
   const refreshTimer = useRef<number>();
   const conversationRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -127,6 +133,11 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
   const host = data.hosts.find((candidate) => candidate.id === snapshot.hostId);
   const workspace = data.workspaces.find((candidate) => candidate.id === snapshot.workspaceId);
   const pendingApprovals = data.approvals.filter((approval) => approval.boxId === boxId && approval.status === "pending");
+  const directAccess = data.acl.find((entry) => entry.userId === currentUser?.id)?.role;
+  const ownsBox = snapshot.ownerUserId === currentUser?.id || directAccess === "owner";
+  const hasOrganizationControl = roleAtLeast(currentUser?.role, "admin");
+  const canOperateBox = hasOrganizationControl || ownsBox || directAccess === "operator";
+  const effectiveAccess = hasOrganizationControl ? `${currentUser?.role} · organization-wide` : ownsBox ? "owner" : directAccess ?? "viewer";
   const recentEvents = events.filter((event) => event.seq > snapshot.lastEventSeq);
   const effectiveStatus = recentEvents.reduce<BoxStatus>((status, event) => {
     if (event.type === "run.started") return "running";
@@ -144,7 +155,7 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
     const content = composer.trim();
-    if (!content || sending) return;
+    if (!canOperateBox || !content || sending) return;
     setSending(true);
     setSendError(undefined);
     try {
@@ -171,6 +182,7 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
   };
 
   const control = async (action: "interrupt" | "stop" | "resume") => {
+    if (!canOperateBox) return;
     setControlAction(action);
     setControlError(undefined);
     try {
@@ -196,9 +208,10 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
         </div>
         <div className="box-console__controls">
           <StatusChip status={effectiveStatus} />
-          {canInterrupt ? <Button icon="interrupt" busy={controlAction === "interrupt"} disabled={Boolean(controlAction)} onClick={() => void control("interrupt")}>Interrupt</Button> : null}
-          {canResume ? <Button icon="resume" variant="primary" busy={controlAction === "resume"} disabled={Boolean(controlAction)} onClick={() => void control("resume")}>Resume</Button> : null}
-          {canStop ? <Button icon="stop" variant="danger" disabled={Boolean(controlAction)} onClick={() => setConfirmStop(true)}>Stop</Button> : null}
+          <Button icon="share" onClick={() => setSharingOpen(true)}>Sharing</Button>
+          {canOperateBox && canInterrupt ? <Button icon="interrupt" busy={controlAction === "interrupt"} disabled={Boolean(controlAction)} onClick={() => void control("interrupt")}>Interrupt</Button> : null}
+          {canOperateBox && canResume ? <Button icon="resume" variant="primary" busy={controlAction === "resume"} disabled={Boolean(controlAction)} onClick={() => void control("resume")}>Resume</Button> : null}
+          {canOperateBox && canStop ? <Button icon="stop" variant="danger" disabled={Boolean(controlAction)} onClick={() => setConfirmStop(true)}>Stop</Button> : null}
         </div>
       </header>
       {resource.error ? <InlineAlert tone="warning">The latest snapshot could not be loaded. Live events remain connected.</InlineAlert> : null}
@@ -220,38 +233,33 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
             }}
           >
             {data.messages.length === 0 && liveMessages.length === 0 ? (
-              <EmptyState icon="spark" title="Start the conversation" description="Send a prompt to begin a run in this box." />
+              <EmptyState icon="spark" title={canOperateBox ? "Start the conversation" : "No messages yet"} description={canOperateBox ? "Send a prompt to begin a run in this box." : "Your access is read-only. An owner or operator can start the conversation."} />
             ) : (
               <>
-                {data.messages.map((message) => <MessageBubble message={message} key={message.id} />)}
+                {data.messages.map((message) => <MessageBubble message={message} agentName={agent?.name} currentUserId={currentUser?.id} canCancel={canOperateBox} key={message.id} onCancelled={(cancelled) => resource.setData((current) => current ? { ...current, messages: current.messages.map((candidate) => candidate.id === cancelled.id ? cancelled : candidate) } : current)} />)}
                 {liveMessages.map((message) => <LiveMessageBubble message={message} key={message.id} />)}
               </>
             )}
           </div>
-          <form className="composer" onSubmit={send}>
-            <fieldset className="delivery-selector">
-              <legend className="sr-only">Delivery mode</legend>
-              {(["prompt", "steer", "follow_up"] as DeliveryMode[]).map((mode) => (
-                <label className={cx(delivery === mode && "delivery-selector__option--active")} key={mode}>
-                  <input type="radio" name="delivery" value={mode} checked={delivery === mode} onChange={() => setDelivery(mode)} />
-                  {mode === "follow_up" ? "Follow-up" : humanize(mode)}
-                </label>
-              ))}
-            </fieldset>
-            <div className="composer__input">
-              <textarea
-                aria-label="Message"
-                rows={3}
-                value={composer}
-                onChange={(event) => setComposer(event.target.value)}
-                onKeyDown={handleComposerKey}
-                placeholder={delivery === "prompt" ? "Give the agent a task…" : delivery === "steer" ? "Redirect the active run…" : "Queue work after the active run…"}
-              />
-              <Button type="submit" variant="primary" icon="send" busy={sending} disabled={!composer.trim()} aria-label="Send message">Send</Button>
-            </div>
-            <div className="composer__footer"><span>{delivery === "prompt" ? "Starts a new run when idle." : delivery === "steer" ? "Adjusts the active run immediately." : "Runs after the current turn completes."}</span><span><kbd>⌘</kbd><span>+</span><kbd>Enter</kbd> to send</span></div>
-            {sendError ? <InlineAlert>{sendError}</InlineAlert> : null}
-          </form>
+          {canOperateBox ? (
+            <form className="composer" onSubmit={send}>
+              <fieldset className="delivery-selector">
+                <legend className="sr-only">Delivery mode</legend>
+                {(["prompt", "steer", "follow_up"] as DeliveryMode[]).map((mode) => (
+                  <label className={cx(delivery === mode && "delivery-selector__option--active")} key={mode}>
+                    <input type="radio" name="delivery" value={mode} checked={delivery === mode} onChange={() => setDelivery(mode)} />
+                    {mode === "follow_up" ? "Follow-up" : humanize(mode)}
+                  </label>
+                ))}
+              </fieldset>
+              <div className="composer__input">
+                <textarea aria-label="Message" rows={3} value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={handleComposerKey} placeholder={delivery === "prompt" ? "Give the agent a task…" : delivery === "steer" ? "Redirect the active run…" : "Queue work after the active run…"} />
+                <Button type="submit" variant="primary" icon="send" busy={sending} disabled={!composer.trim()} aria-label="Send message">Send</Button>
+              </div>
+              <div className="composer__footer"><span>{delivery === "prompt" ? "Starts a new run when idle." : delivery === "steer" ? "Adjusts the active run immediately." : "Runs after the current turn completes."}</span><span><kbd>⌘</kbd><span>+</span><kbd>Enter</kbd> to send</span></div>
+              {sendError ? <InlineAlert>{sendError}</InlineAlert> : null}
+            </form>
+          ) : <div className="composer composer--read-only"><Icon name="approval" /><div><strong>Read-only conversation</strong><span>Your {effectiveAccess} access can view messages and live events, but cannot send or control this box.</span></div></div>}
         </section>
 
         <aside className="console-sidebar" aria-label="Session context">
@@ -262,6 +270,7 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
               <div><dt>Runtime</dt><dd>{(snapshot.runtimeType ?? agent?.runtimeType ?? "—").toUpperCase()}</dd></div>
               <div><dt>Host</dt><dd><span className={cx("mini-dot", host?.status === "online" && "mini-dot--online")} />{host?.name ?? "Unknown"}</dd></div>
               <div><dt>Workspace</dt><dd title={workspace?.path}>{workspace?.name ?? "Unknown"}</dd></div>
+              <div><dt>Access</dt><dd>{effectiveAccess}</dd></div>
               <div><dt>Event cursor</dt><dd className="mono">#{Math.max(snapshot.lastEventSeq, events.at(-1)?.seq ?? 0)}</dd></div>
             </dl>
           </section>
@@ -269,7 +278,7 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
           {pendingApprovals.length ? (
             <section className="sidebar-section">
               <div className="panel__header"><div><p className="eyebrow">Decision needed</p><h2>Pending approval</h2></div><span className="nav-badge">{pendingApprovals.length}</span></div>
-              {pendingApprovals.map((approval) => <ApprovalCard approval={approval} compact key={approval.id} onResolved={(resolved) => resource.setData((current) => current ? { ...current, approvals: current.approvals.map((item) => item.id === resolved.id ? resolved : item) } : current)} />)}
+              {pendingApprovals.map((approval) => <ApprovalCard approval={approval} compact canDecide={canOperateBox} key={approval.id} onResolved={(resolved) => resource.setData((current) => current ? { ...current, approvals: current.approvals.map((item) => item.id === resolved.id ? resolved : item) } : current)} />)}
             </section>
           ) : null}
 
@@ -283,18 +292,44 @@ export function BoxDetailView({ boxId }: { boxId: string }) {
       <Modal open={confirmStop} onClose={() => setConfirmStop(false)} title={`Stop ${snapshot.name}?`} description="The runtime will be asked to stop gracefully." size="small">
         <div className="confirm-dialog"><p>The box and its history remain available, but the active process will end.</p><div className="modal__actions"><Button onClick={() => setConfirmStop(false)}>Keep running</Button><Button variant="danger" icon="stop" busy={controlAction === "stop"} onClick={() => void control("stop")}>Stop box</Button></div></div>
       </Modal>
+      <AccessControlDialog open={sharingOpen} resourceKind="box" resourceId={boxId} resourceName={snapshot.name} onClose={() => setSharingOpen(false)} onSaved={resource.reload} />
     </div>
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({ message, agentName, currentUserId, canCancel, onCancelled }: { message: Message; agentName?: string; currentUserId?: string; canCancel: boolean; onCancelled: (message: Message) => void }) {
+  const { notify } = useToast();
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string>();
   const text = messageText(message.content, message.plainText);
+  const authoredByCurrentUser = Boolean(currentUserId && message.authorUserId === currentUserId);
+  const authorLabel = authoredByCurrentUser
+    ? `${message.authorName || "You"}${message.authorName ? " (you)" : ""}`
+    : message.authorName || (message.role === "assistant" ? agentName || "Agent" : message.role === "system" ? "System" : message.authorUserId ? `User ${message.authorUserId.slice(0, 8)}` : "Organization member");
+  const cancellable = canCancel && message.delivery === "follow_up" && message.status === "queued";
+
+  const cancel = async () => {
+    setCancelling(true);
+    setCancelError(undefined);
+    try {
+      const cancelled = await api.cancelMessage(message.boxId, message.id);
+      onCancelled(cancelled);
+      notify("Queued follow-up cancelled.");
+    } catch (requestError) {
+      setCancelError(errorMessage(requestError));
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
-    <article className={cx("message", `message--${message.role}`)}>
-      <div className="message__avatar" aria-hidden="true">{message.role === "user" ? "Y" : message.role === "assistant" ? <Icon name="agent" size={17} /> : <Icon name="activity" size={17} />}</div>
+    <article className={cx("message", `message--${message.role}`, message.status === "cancelled" && "message--cancelled")}>
+      <div className="message__avatar" aria-hidden="true">{message.role === "user" ? initials(authorLabel.replace(" (you)", "")) : message.role === "assistant" ? <Icon name="agent" size={17} /> : <Icon name="activity" size={17} />}</div>
       <div className="message__body">
-        <header><strong>{message.authorName || (message.role === "user" ? "You" : message.role === "assistant" ? "Agent" : "System")}</strong>{message.delivery ? <span>{message.delivery === "follow_up" ? "Follow-up" : humanize(message.delivery)}</span> : null}<time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time></header>
+        <header><strong>{authorLabel}</strong><span>{message.role === "user" ? "User" : message.role === "assistant" ? "Agent" : "System"}</span>{message.delivery ? <span>{message.delivery === "follow_up" ? "Follow-up" : humanize(message.delivery)}</span> : null}{message.status !== "completed" ? <span className={`message-status message-status--${message.status}`}>{humanize(message.status)}</span> : null}<time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time></header>
         <div className="message__content">{text || <em>No text content</em>}</div>
+        {cancellable ? <div className="message__actions"><Button type="button" variant="ghost" icon="close" busy={cancelling} onClick={() => void cancel()}>Cancel queued message</Button></div> : null}
+        {cancelError ? <p className="message__error" role="alert">{cancelError}</p> : null}
       </div>
     </article>
   );

@@ -7,6 +7,7 @@ import { BoxDetailView } from "./views/BoxDetailView";
 import { BoxesView } from "./views/BoxesView";
 import { DashboardView } from "./views/DashboardView";
 import { HostsView } from "./views/HostsView";
+import { MembersView } from "./views/MembersView";
 import { WorkspacesView } from "./views/WorkspacesView";
 
 export function App() {
@@ -16,6 +17,7 @@ export function App() {
   if (pathname === "/") content = <DashboardView />;
   else if (pathname === "/agents") content = <AgentsView />;
   else if (pathname === "/hosts") content = <HostsView />;
+  else if (pathname === "/members") content = <MembersView />;
   else if (pathname === "/workspaces") content = <WorkspacesView />;
   else if (pathname === "/boxes") content = <BoxesView />;
   else if (pathname === "/approvals") content = <ApprovalsView />;

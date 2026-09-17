@@ -1,5 +1,7 @@
 export type RuntimeType = "omp" | "claude" | "acp";
 export type HostStatus = "enrolling" | "online" | "draining" | "offline" | "revoked";
+export type OrganizationRole = "owner" | "admin" | "operator" | "viewer";
+export type ResourceRole = "owner" | "operator" | "viewer";
 export type WorkspaceStatus = "provisioning" | "ready" | "error" | "archived";
 export type BoxStatus =
   | "created"
@@ -27,10 +29,62 @@ export type DeliveryMode = "prompt" | "steer" | "follow_up";
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
+export interface CurrentUser {
+  id: string;
+  login: string;
+  displayName: string;
+  role: OrganizationRole;
+}
+
 export interface Meta {
   serverVersion: string;
   apiVersion: string;
   minDaemonVersion?: string;
+  currentUser: CurrentUser;
+}
+
+export interface Member {
+  id: string;
+  organizationId: string;
+  login: string;
+  displayName: string;
+  role: OrganizationRole;
+  createdAt: string;
+}
+
+export interface Team {
+  id: string;
+  organizationId: string;
+  slug: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccessControlEntry {
+  id: string;
+  organizationId: string;
+  resourceId: string;
+  userId?: string;
+  teamId?: string;
+  role: ResourceRole;
+  createdByUserId: string;
+  createdAt: string;
+}
+
+export interface AccessControlInput {
+  userId?: string;
+  teamId?: string;
+  role: ResourceRole;
+}
+
+export interface ReplaceAccessControlRequest {
+  entries: AccessControlInput[];
+}
+
+export interface UpdateMemberRoleRequest {
+  role: OrganizationRole;
 }
 
 export interface Agent {
@@ -88,6 +142,7 @@ export interface Box {
   hostId: string;
   workspaceId: string;
   status: BoxStatus;
+  ownerUserId?: string;
   runtimeType?: RuntimeType | string;
   version?: number;
   lastEventSeq?: number;
@@ -128,6 +183,7 @@ export interface Message {
   boxSeq?: number;
   authorType?: string;
   authorName?: string | null;
+  authorUserId?: string;
   role: "user" | "assistant" | "system";
   delivery?: DeliveryMode | null;
   status: string;

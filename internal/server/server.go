@@ -158,6 +158,10 @@ func (s *Server) routes() http.Handler {
 		api.Use(s.authenticate)
 		api.Get("/meta", s.handleMeta)
 
+		api.With(s.requireRole(roleViewer)).Get("/members", s.handleListMembers)
+		api.With(s.requireRole(roleAdmin)).Patch("/members/{memberID}/role", s.handleUpdateMemberRole)
+		api.With(s.requireRole(roleViewer)).Get("/teams", s.handleListTeams)
+
 		api.With(s.requireRole(roleViewer)).Get("/agents", s.handleListAgents)
 		api.With(s.requireRole(roleViewer)).Get("/agents/{agentID}", s.handleGetAgent)
 		api.With(s.requireRole(roleAdmin)).Post("/agents", s.handleCreateAgent)
@@ -168,19 +172,24 @@ func (s *Server) routes() http.Handler {
 		api.With(s.requireRole(roleViewer)).Get("/workspaces", s.handleListWorkspaces)
 		api.With(s.requireRole(roleViewer)).Get("/workspaces/{workspaceID}", s.handleGetWorkspace)
 		api.With(s.requireRole(roleAdmin)).Post("/workspaces", s.handleCreateWorkspace)
+		api.With(s.requireRole(roleViewer)).Get("/workspaces/{workspaceID}/acl", s.handleListWorkspaceACL)
+		api.With(s.requireRole(roleViewer)).Put("/workspaces/{workspaceID}/acl", s.handleReplaceWorkspaceACL)
 
 		api.With(s.requireRole(roleViewer)).Get("/boxes", s.handleListBoxes)
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}", s.handleGetBox)
-		api.With(s.requireRole(roleOperator)).Post("/boxes", s.handleCreateBox)
+		api.With(s.requireRole(roleViewer)).Post("/boxes", s.handleCreateBox)
+		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/acl", s.handleListBoxACL)
+		api.With(s.requireRole(roleViewer)).Put("/boxes/{boxID}/acl", s.handleReplaceBoxACL)
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/messages", s.handleListMessages)
-		api.With(s.requireRole(roleOperator)).Post("/boxes/{boxID}/messages", s.handleSendMessage)
+		api.With(s.requireRole(roleViewer)).Post("/boxes/{boxID}/messages", s.handleSendMessage)
+		api.With(s.requireRole(roleViewer)).Delete("/boxes/{boxID}/messages/{messageID}", s.handleCancelQueuedMessage)
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/events", s.handleEvents)
-		api.With(s.requireRole(roleOperator)).Post("/boxes/{boxID}/interrupt", s.handleInterrupt)
-		api.With(s.requireRole(roleOperator)).Post("/boxes/{boxID}/stop", s.handleStop)
-		api.With(s.requireRole(roleOperator)).Post("/boxes/{boxID}/resume", s.handleResume)
+		api.With(s.requireRole(roleViewer)).Post("/boxes/{boxID}/interrupt", s.handleInterrupt)
+		api.With(s.requireRole(roleViewer)).Post("/boxes/{boxID}/stop", s.handleStop)
+		api.With(s.requireRole(roleViewer)).Post("/boxes/{boxID}/resume", s.handleResume)
 
-		api.With(s.requireRole(roleOperator)).Get("/approvals", s.handleListApprovals)
-		api.With(s.requireRole(roleOperator)).Post("/approvals/{approvalID}/decision", s.handleDecideApproval)
+		api.With(s.requireRole(roleViewer)).Get("/approvals", s.handleListApprovals)
+		api.With(s.requireRole(roleViewer)).Post("/approvals/{approvalID}/decision", s.handleDecideApproval)
 	})
 
 	if strings.TrimSpace(s.staticDir) != "" {
@@ -224,11 +233,18 @@ func (s *Server) handleReady(writer http.ResponseWriter, request *http.Request) 
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-func (s *Server) handleMeta(writer http.ResponseWriter, _ *http.Request) {
-	writeJSON(writer, http.StatusOK, map[string]string{
+func (s *Server) handleMeta(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	writeJSON(writer, http.StatusOK, map[string]any{
 		"serverVersion":    s.serverVersion,
 		"apiVersion":       defaultAPIVersion,
 		"minDaemonVersion": "0.1.0",
+		"currentUser": map[string]string{
+			"id":          user.ID,
+			"login":       user.Login,
+			"displayName": user.DisplayName,
+			"role":        user.Role,
+		},
 	})
 }
 

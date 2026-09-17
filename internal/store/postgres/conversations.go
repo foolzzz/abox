@@ -82,9 +82,6 @@ func (s *Store) SendMessage(ctx context.Context, user domain.User, boxID string,
 	var run *domain.Run
 	var command *domain.HostCommand
 	err = s.withTx(ctx, func(tx pgx.Tx) error {
-		if _, err := requireRole(ctx, tx, user, "owner", "admin", "operator"); err != nil {
-			return err
-		}
 		var organizationID, hostID, workspaceID, boxStatus, hostStatus, workspaceStatus string
 		err := tx.QueryRow(ctx, `
             SELECT b.organization_id, b.host_id, b.workspace_id, b.status,
@@ -140,23 +137,40 @@ func (s *Store) SendMessage(ctx context.Context, user domain.User, boxID string,
 			return mapError("allocate message sequence", err)
 		}
 
-		var activeRunID, activeRuntimeID string
+		var activeRunID, activeRuntimeID, activeRunStatus string
 		err = tx.QueryRow(ctx, `
-            SELECT id, COALESCE(runtime_instance_id::text, '')
+            SELECT id, COALESCE(runtime_instance_id::text, ''), status
             FROM runs
             WHERE box_id = $1
               AND status IN ('dispatching','running','waiting_approval','interrupting','disconnected')
-            FOR UPDATE`, boxID).Scan(&activeRunID, &activeRuntimeID)
+            FOR UPDATE`, boxID).Scan(&activeRunID, &activeRuntimeID, &activeRunStatus)
 		hasActiveRun := err == nil
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return mapError("find active run", err)
 		}
-		if input.Delivery == domain.DeliverySteer && !hasActiveRun {
-			return fmt.Errorf("%w: steer requires an active run", storepkg.ErrInvalidState)
+		switch input.Delivery {
+		case domain.DeliveryPrompt:
+			if hasActiveRun {
+				return fmt.Errorf("%w: prompt requires no active run", storepkg.ErrInvalidState)
+			}
+			if boxStatus != string(domain.BoxCreated) && boxStatus != string(domain.BoxIdle) && boxStatus != string(domain.BoxHibernated) {
+				return fmt.Errorf("%w: prompt is not allowed while box is %s", storepkg.ErrInvalidState, boxStatus)
+			}
+		case domain.DeliverySteer:
+			if !hasActiveRun || activeRunStatus != string(domain.RunRunning) || boxStatus != string(domain.BoxRunning) {
+				return fmt.Errorf("%w: steer requires a running run", storepkg.ErrInvalidState)
+			}
+			if activeRuntimeID == "" {
+				return fmt.Errorf("%w: active run has no runtime", storepkg.ErrRuntimeMissing)
+			}
+		case domain.DeliveryFollowUp:
+			if !hasActiveRun {
+				return fmt.Errorf("%w: follow_up requires an active run", storepkg.ErrInvalidState)
+			}
 		}
 
 		initialStatus := "queued"
-		if !hasActiveRun || input.Delivery == domain.DeliverySteer {
+		if input.Delivery != domain.DeliveryFollowUp {
 			initialStatus = "dispatched"
 		}
 		_, err = tx.Exec(ctx, `
@@ -171,10 +185,7 @@ func (s *Store) SendMessage(ctx context.Context, user domain.User, boxID string,
 			return mapError("insert message", err)
 		}
 
-		if hasActiveRun && input.Delivery == domain.DeliverySteer {
-			if activeRuntimeID == "" {
-				return fmt.Errorf("%w: active run has no runtime", storepkg.ErrRuntimeMissing)
-			}
+		if input.Delivery == domain.DeliverySteer {
 			if _, err := tx.Exec(ctx, `UPDATE messages SET run_id = $2 WHERE id = $1`, messageID, activeRunID); err != nil {
 				return mapError("attach steer message", err)
 			}
@@ -195,7 +206,7 @@ func (s *Store) SendMessage(ctx context.Context, user domain.User, boxID string,
 				return err
 			}
 			runStatus := domain.RunQueued
-			if !hasActiveRun {
+			if input.Delivery == domain.DeliveryPrompt {
 				runStatus = domain.RunDispatching
 			}
 			priority := int16(100)
@@ -215,7 +226,7 @@ func (s *Store) SendMessage(ctx context.Context, user domain.User, boxID string,
 			if _, err := tx.Exec(ctx, `UPDATE messages SET run_id = $2 WHERE id = $1`, messageID, runID); err != nil {
 				return mapError("attach message run", err)
 			}
-			if !hasActiveRun {
+			if input.Delivery == domain.DeliveryPrompt {
 				commandValue, err := dispatchRunTx(ctx, tx, boxID, runID)
 				if err != nil {
 					return err
@@ -241,6 +252,74 @@ func (s *Store) SendMessage(ctx context.Context, user domain.User, boxID string,
 		return nil
 	})
 	return message, run, command, err
+}
+
+func (s *Store) CancelQueuedMessage(ctx context.Context, user domain.User, boxID, messageID string) (domain.Message, error) {
+	if boxID == "" || messageID == "" {
+		return domain.Message{}, fmt.Errorf("%w: box and message ids are required", storepkg.ErrInvalidState)
+	}
+	var result domain.Message
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		var organizationID string
+		if err := tx.QueryRow(ctx, `
+            SELECT organization_id FROM boxes
+            WHERE id = $1 AND organization_id = $2
+            FOR UPDATE`, boxID, user.OrganizationID).Scan(&organizationID); err != nil {
+			return mapError("lock cancellation box", err)
+		}
+		allowed, err := canOperateBox(ctx, tx, user, boxID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return fmt.Errorf("%w: box operator access required", storepkg.ErrForbidden)
+		}
+		var messageStatus, delivery, runID, runStatus string
+		err = tx.QueryRow(ctx, `
+            SELECT m.status, COALESCE(m.delivery, ''), COALESCE(m.run_id::text, ''), COALESCE(r.status, '')
+            FROM messages m
+            JOIN runs r ON r.id = m.run_id AND r.box_id = m.box_id
+            WHERE m.organization_id = $1 AND m.box_id = $2 AND m.id = $3
+            FOR UPDATE OF m, r`, organizationID, boxID, messageID).Scan(
+			&messageStatus, &delivery, &runID, &runStatus)
+		if err != nil {
+			return mapError("lock queued message", err)
+		}
+		if messageStatus == "cancelled" && runStatus == string(domain.RunCancelled) {
+			result, err = getMessage(ctx, tx, messageID)
+			return err
+		}
+		if domain.Delivery(delivery) != domain.DeliveryFollowUp || messageStatus != "queued" || runID == "" || runStatus != string(domain.RunQueued) {
+			return fmt.Errorf("%w: only queued follow_up messages can be cancelled", storepkg.ErrConflict)
+		}
+		messageTag, err := tx.Exec(ctx, `
+            UPDATE messages SET status = 'cancelled'
+            WHERE id = $1 AND status = 'queued'`, messageID)
+		if err != nil {
+			return mapError("cancel queued message", err)
+		}
+		if messageTag.RowsAffected() != 1 {
+			return fmt.Errorf("%w: queued message cancellation lost compare-and-set", storepkg.ErrConflict)
+		}
+		runTag, err := tx.Exec(ctx, `
+            UPDATE runs
+            SET status = 'cancelled', finished_at = now(), terminal_reason = 'user_cancelled', version = version + 1
+            WHERE id = $1 AND status = 'queued'`, runID)
+		if err != nil {
+			return mapError("cancel queued run", err)
+		}
+		if runTag.RowsAffected() != 1 {
+			return fmt.Errorf("%w: queued run cancellation lost compare-and-set", storepkg.ErrConflict)
+		}
+		if err := insertAudit(ctx, tx, organizationID, "user", user.ID, "",
+			"message.cancelled", "message", messageID,
+			map[string]any{"boxId": boxID, "runId": runID}); err != nil {
+			return err
+		}
+		result, err = getMessage(ctx, tx, messageID)
+		return err
+	})
+	return result, err
 }
 
 func (s *Store) ClaimNextRun(ctx context.Context, boxID string) (*domain.Run, *domain.HostCommand, error) {
@@ -381,6 +460,20 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
 		"runtime":           runtimeType,
 		"workspace":         workspacePath,
 		"subagentEventMode": "events",
+		"initialInput": map[string]any{
+			"id":       messageID,
+			"message":  messageText,
+			"delivery": delivery,
+		},
+	}
+	var runtimeSnapshot struct {
+		SystemPrompt string `json:"systemPrompt"`
+	}
+	if err := json.Unmarshal(configSnapshot, &runtimeSnapshot); err != nil {
+		return domain.HostCommand{}, fmt.Errorf("decode runtime config snapshot: %w", err)
+	}
+	if runtimeSnapshot.SystemPrompt != "" {
+		startPayload["systemPrompt"] = runtimeSnapshot.SystemPrompt
 	}
 	if model != "" {
 		startPayload["model"] = model

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	hostv1 "agentbox/api"
+	"agentbox/internal/domain"
 	hostclient "agentbox/internal/host"
 	runtimeapi "agentbox/internal/runtime"
 	ompruntime "agentbox/internal/runtime/omp"
@@ -26,6 +27,14 @@ type EventPublisher interface {
 	PublishRuntimeEvent(ctx context.Context, event runtimeapi.Event) (uint64, error)
 }
 
+// AdapterRegistration describes a successfully probed runtime available for new boxes.
+type AdapterRegistration struct {
+	Adapter            runtimeapi.Adapter
+	Version            string
+	Capabilities       runtimeapi.Capabilities
+	StaticApprovalMode string
+}
+
 type managedRuntime struct {
 	opMu sync.Mutex
 	mu   sync.Mutex
@@ -35,6 +44,7 @@ type managedRuntime struct {
 	runtimeType       string
 	runtimeVersion    string
 	workspace         string
+	adapter           runtimeapi.Adapter
 	handle            runtimeapi.Handle
 	status            string
 	processID         int64
@@ -49,12 +59,10 @@ type managedRuntime struct {
 }
 
 type Manager struct {
-	adapter        runtimeapi.Adapter
-	runtimeVersion string
-	capabilities   runtimeapi.Capabilities
-	guard          *WorkspaceGuard
-	commandGate    sync.RWMutex
-	state          *StateStore
+	adapters    map[runtimeapi.Type]AdapterRegistration
+	guard       *WorkspaceGuard
+	commandGate sync.RWMutex
+	state       *StateStore
 
 	mu             sync.Mutex
 	boxes          map[string]*managedRuntime
@@ -70,18 +78,30 @@ type Manager struct {
 	fatal     chan error
 }
 
-func NewManager(adapter runtimeapi.Adapter, runtimeVersion string, capabilities runtimeapi.Capabilities, guard *WorkspaceGuard, state *StateStore, maxActiveBoxes int, maxRunDuration time.Duration) (*Manager, error) {
-	if adapter == nil || guard == nil || state == nil {
-		return nil, errors.New("runtime adapter, workspace guard, and state store are required")
+func NewManager(adapters []AdapterRegistration, guard *WorkspaceGuard, state *StateStore, maxActiveBoxes int, maxRunDuration time.Duration) (*Manager, error) {
+	if guard == nil || state == nil {
+		return nil, errors.New("workspace guard and state store are required")
 	}
 	if maxActiveBoxes <= 0 || maxRunDuration <= 0 {
 		return nil, errors.New("runtime limits must be positive")
 	}
+	registry := make(map[runtimeapi.Type]AdapterRegistration, len(adapters))
+	for _, registration := range adapters {
+		if registration.Adapter == nil {
+			return nil, errors.New("runtime adapter is required")
+		}
+		runtimeType := registration.Adapter.Name()
+		if runtimeType == "" {
+			return nil, errors.New("runtime adapter name is required")
+		}
+		if _, exists := registry[runtimeType]; exists {
+			return nil, fmt.Errorf("runtime adapter %q is registered more than once", runtimeType)
+		}
+		registry[runtimeType] = registration
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		adapter:        adapter,
-		runtimeVersion: runtimeVersion,
-		capabilities:   capabilities,
+		adapters:       registry,
 		guard:          guard,
 		state:          state,
 		boxes:          make(map[string]*managedRuntime),
@@ -143,6 +163,8 @@ func (m *Manager) HandleCommand(ctx context.Context, command *hostv1.HostCommand
 		result = m.handleInput(ctx, command, runtimeapi.InputSteer)
 	case "runtime.follow_up":
 		result = m.handleInput(ctx, command, runtimeapi.InputFollowUp)
+	case "runtime.approval_response":
+		result = m.handleApprovalResponse(ctx, command)
 	case "runtime.interrupt":
 		result = m.handleInterrupt(ctx, command)
 	case "runtime.stop":
@@ -155,15 +177,24 @@ func (m *Manager) HandleCommand(ctx context.Context, command *hostv1.HostCommand
 	return result, nil
 }
 
+type initialInputPayload struct {
+	ID       string          `json:"id"`
+	Message  string          `json:"message"`
+	Delivery string          `json:"delivery"`
+	Payload  json.RawMessage `json:"payload"`
+}
+
 type startPayload struct {
-	Runtime           string            `json:"runtime"`
-	Workspace         string            `json:"workspace"`
-	SessionRef        string            `json:"sessionRef"`
-	Model             string            `json:"model"`
-	SystemPromptFile  string            `json:"systemPromptFile"`
-	ApprovalMode      string            `json:"approvalMode"`
-	Environment       map[string]string `json:"environment"`
-	SubagentEventMode string            `json:"subagentEventMode"`
+	Runtime           string               `json:"runtime"`
+	Workspace         string               `json:"workspace"`
+	SessionRef        string               `json:"sessionRef"`
+	Model             string               `json:"model"`
+	SystemPrompt      string               `json:"systemPrompt"`
+	SystemPromptFile  string               `json:"systemPromptFile"`
+	ApprovalMode      string               `json:"approvalMode"`
+	Environment       map[string]string    `json:"environment"`
+	SubagentEventMode string               `json:"subagentEventMode"`
+	InitialInput      *initialInputPayload `json:"initialInput"`
 }
 
 func (m *Manager) handleStart(ctx context.Context, command *hostv1.HostCommand) hostclient.CommandResult {
@@ -174,10 +205,12 @@ func (m *Manager) handleStart(ctx context.Context, command *hostv1.HostCommand) 
 	if err := decodePayload(command.PayloadJson, &payload); err != nil {
 		return failedResult("invalid_payload", err)
 	}
+	payload.Runtime = strings.TrimSpace(payload.Runtime)
 	if payload.Runtime == "" {
 		payload.Runtime = string(runtimeapi.TypeOMP)
 	}
-	if payload.Runtime != string(runtimeapi.TypeOMP) {
+	registration, available := m.adapters[runtimeapi.Type(payload.Runtime)]
+	if !available {
 		return failedResult("unsupported_runtime", fmt.Errorf("runtime %q is not available", payload.Runtime))
 	}
 	if err := validateEnvironment(payload.Environment); err != nil {
@@ -188,7 +221,7 @@ func (m *Manager) handleStart(ctx context.Context, command *hostv1.HostCommand) 
 	if payload.Workspace == "" && hasPrevious {
 		payload.Workspace = previous.Workspace
 	}
-	if payload.SessionRef == "" && hasPrevious {
+	if payload.SessionRef == "" && hasPrevious && previous.RuntimeType == payload.Runtime {
 		payload.SessionRef = previous.SessionRef
 	}
 	workspace, err := m.guard.ResolveWorkspace(payload.Workspace)
@@ -201,16 +234,23 @@ func (m *Manager) handleStart(ctx context.Context, command *hostv1.HostCommand) 
 			return failedResult("workspace_rejected", err)
 		}
 	}
+	if payload.SystemPrompt != "" {
+		payload.SystemPromptFile, err = m.state.WritePromptFile(command.BoxId, payload.SystemPrompt)
+		if err != nil {
+			return failedResult("state_persistence", err)
+		}
+	}
 
 	slot := &managedRuntime{
 		boxID:             command.BoxId,
 		runtimeInstanceID: command.RuntimeInstanceId,
 		runtimeType:       payload.Runtime,
-		runtimeVersion:    m.runtimeVersion,
+		runtimeVersion:    registration.Version,
 		workspace:         workspace,
+		adapter:           registration.Adapter,
 		status:            "starting",
 		sessionRef:        payload.SessionRef,
-		capabilities:      m.capabilities,
+		capabilities:      registration.Capabilities,
 		startedAt:         time.Now().UTC(),
 		runID:             command.RunId,
 	}
@@ -252,14 +292,20 @@ func (m *Manager) handleStart(ctx context.Context, command *hostv1.HostCommand) 
 		return failedResult("state_persistence", err)
 	}
 
-	handle, err := m.adapter.Start(ctx, runtimeapi.StartSpec{
+	// A daemon-level static policy cannot be weakened by a remote start payload.
+	approvalMode := payload.ApprovalMode
+	if registration.StaticApprovalMode != "" {
+		approvalMode = registration.StaticApprovalMode
+	}
+
+	handle, err := registration.Adapter.Start(ctx, runtimeapi.StartSpec{
 		BoxID:             command.BoxId,
 		RunID:             command.RunId,
 		Workspace:         workspace,
 		SessionRef:        payload.SessionRef,
 		Model:             payload.Model,
 		SystemPromptFile:  payload.SystemPromptFile,
-		ApprovalMode:      payload.ApprovalMode,
+		ApprovalMode:      approvalMode,
 		Environment:       payload.Environment,
 		SubagentEventMode: payload.SubagentEventMode,
 	})
@@ -276,14 +322,27 @@ func (m *Manager) handleStart(ctx context.Context, command *hostv1.HostCommand) 
 		return failedResult(runtimeErrorCode(err), err)
 	}
 
+	runtimeState, inspectErr := registration.Adapter.Inspect(ctx, handle)
 	slot.mu.Lock()
 	slot.handle = handle
 	slot.sessionRef = handle.SessionRef()
-	slot.status = "ready"
+	if inspectErr == nil {
+		if runtimeState.Status != "" {
+			slot.status = runtimeState.Status
+		}
+		if runtimeState.SessionRef != "" {
+			slot.sessionRef = runtimeState.SessionRef
+		}
+		slot.capabilities = runtimeState.Capabilities
+		if !runtimeState.StartedAt.IsZero() {
+			slot.startedAt = runtimeState.StartedAt
+		}
+		slot.lastEventAt = runtimeState.LastEventAt
+	}
 	slot.mu.Unlock()
 	if err := m.persistSlot(slot); err != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), forcedStopGrace)
-		_ = m.adapter.Stop(stopCtx, handle, runtimeapi.StopForce)
+		_ = registration.Adapter.Stop(stopCtx, handle, runtimeapi.StopForce)
 		cancel()
 		m.removeSlot(slot)
 		slot.opMu.Unlock()
@@ -293,6 +352,35 @@ func (m *Manager) handleStart(ctx context.Context, command *hostv1.HostCommand) 
 
 	m.eventWG.Add(1)
 	go m.forwardEvents(slot, handle)
+	if payload.InitialInput != nil && strings.TrimSpace(payload.InitialInput.Message) != "" {
+		kind := runtimeapi.InputPrompt
+		switch payload.InitialInput.Delivery {
+		case string(domain.DeliverySteer):
+			kind = runtimeapi.InputSteer
+		case string(domain.DeliveryFollowUp):
+			kind = runtimeapi.InputFollowUp
+		}
+		inputID := payload.InitialInput.ID
+		if inputID == "" {
+			inputID = command.IdempotencyKey + ":initial"
+		}
+		if kind == runtimeapi.InputPrompt || kind == runtimeapi.InputFollowUp {
+			m.armRunDeadline(slot, command.RunId, time.Now().UTC())
+		}
+		if err := registration.Adapter.Send(ctx, handle, runtimeapi.Input{
+			ID:      inputID,
+			RunID:   command.RunId,
+			Kind:    kind,
+			Message: payload.InitialInput.Message,
+			Payload: payload.InitialInput.Payload,
+		}); err != nil {
+			stopCtx, cancel := context.WithTimeout(context.Background(), forcedStopGrace)
+			_ = registration.Adapter.Stop(stopCtx, handle, runtimeapi.StopForce)
+			cancel()
+			m.removeSlot(slot)
+			return failedResult(runtimeErrorCode(err), err)
+		}
+	}
 	return completedJSON(slot.resultMap())
 }
 
@@ -333,7 +421,7 @@ func (m *Manager) handleInput(ctx context.Context, command *hostv1.HostCommand, 
 	if inputID == "" {
 		inputID = command.CommandId
 	}
-	if err := m.adapter.Send(ctx, handle, runtimeapi.Input{
+	if err := slot.adapter.Send(ctx, handle, runtimeapi.Input{
 		ID:      inputID,
 		RunID:   command.RunId,
 		Kind:    kind,
@@ -343,6 +431,60 @@ func (m *Manager) handleInput(ctx context.Context, command *hostv1.HostCommand, 
 		if deadlineArmed {
 			slot.finishRunDeadline(command.RunId)
 		}
+		return commandFailure(ctx, err)
+	}
+	return completedJSON(slot.resultMap())
+}
+
+type approvalResponsePayload struct {
+	ApprovalID string          `json:"approvalId"`
+	Approved   bool            `json:"approved"`
+	Payload    json.RawMessage `json:"payload"`
+}
+
+func (m *Manager) handleApprovalResponse(ctx context.Context, command *hostv1.HostCommand) hostclient.CommandResult {
+	var payload approvalResponsePayload
+	if err := decodePayload(command.PayloadJson, &payload); err != nil {
+		return failedResult("invalid_payload", err)
+	}
+	payload.ApprovalID = strings.TrimSpace(payload.ApprovalID)
+	if payload.ApprovalID == "" {
+		return failedResult("invalid_payload", errors.New("approval ID is required"))
+	}
+	if len(payload.Payload) > 0 {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(payload.Payload, &object); err != nil || object == nil {
+			return failedResult("invalid_payload", errors.New("payload must be a JSON object"))
+		}
+	}
+	slot, err := m.activeSlot(command)
+	if err != nil {
+		return failedResult("runtime_not_active", err)
+	}
+	slot.opMu.Lock()
+	defer slot.opMu.Unlock()
+	handle, err := slot.activeHandle()
+	if err != nil {
+		return failedResult("runtime_not_active", err)
+	}
+	slot.mu.Lock()
+	interactiveApproval := slot.capabilities.InteractiveApproval
+	slot.mu.Unlock()
+	if !interactiveApproval {
+		return failedResult("interactive_approval_unsupported", fmt.Errorf("runtime %q does not support interactive approval", slot.runtimeType))
+	}
+	inputID := command.IdempotencyKey
+	if inputID == "" {
+		inputID = command.CommandId
+	}
+	if err := slot.adapter.Send(ctx, handle, runtimeapi.Input{
+		ID:         inputID,
+		RunID:      command.RunId,
+		Kind:       runtimeapi.InputApprovalResponse,
+		ApprovalID: payload.ApprovalID,
+		Approved:   payload.Approved,
+		Payload:    append(json.RawMessage(nil), payload.Payload...),
+	}); err != nil {
 		return commandFailure(ctx, err)
 	}
 	return completedJSON(slot.resultMap())
@@ -362,7 +504,7 @@ func (m *Manager) handleInterrupt(ctx context.Context, command *hostv1.HostComma
 	if err != nil {
 		return failedResult("runtime_not_active", err)
 	}
-	if err := m.adapter.Interrupt(ctx, handle); err != nil {
+	if err := slot.adapter.Interrupt(ctx, handle); err != nil {
 		return commandFailure(ctx, err)
 	}
 	return completedJSON(slot.resultMap())
@@ -416,7 +558,7 @@ func (m *Manager) handleInspect(ctx context.Context, command *hostv1.HostCommand
 	if err != nil {
 		return failedResult("runtime_not_active", err)
 	}
-	state, err := m.adapter.Inspect(ctx, handle)
+	state, err := slot.adapter.Inspect(ctx, handle)
 	if err != nil {
 		return commandFailure(ctx, err)
 	}
@@ -476,11 +618,11 @@ func (m *Manager) stopSlot(ctx context.Context, slot *managedRuntime, mode runti
 		return nil
 	}
 	stopCtx, cancel := context.WithTimeout(ctx, forcedStopGrace)
-	err = m.adapter.Stop(stopCtx, handle, mode)
+	err = slot.adapter.Stop(stopCtx, handle, mode)
 	cancel()
 	if err != nil && mode == runtimeapi.StopGraceful {
 		forceCtx, forceCancel := context.WithTimeout(context.Background(), forcedStopGrace)
-		forceErr := m.adapter.Stop(forceCtx, handle, runtimeapi.StopForce)
+		forceErr := slot.adapter.Stop(forceCtx, handle, runtimeapi.StopForce)
 		forceCancel()
 		if forceErr == nil {
 			err = nil
@@ -533,7 +675,7 @@ func (m *Manager) persistSlot(slot *managedRuntime) error {
 
 func (m *Manager) forwardEvents(slot *managedRuntime, handle runtimeapi.Handle) {
 	defer m.eventWG.Done()
-	for event := range m.adapter.Events(handle) {
+	for event := range slot.adapter.Events(handle) {
 		event.BoxID = slot.boxID
 		event.RuntimeInstanceID = slot.runtimeInstanceID
 		if event.OccurredAt.IsZero() {
@@ -660,7 +802,7 @@ func (m *Manager) waitRunDeadline(ctx context.Context, slot *managedRuntime, run
 	handle, err := slot.activeHandle()
 	if err == nil {
 		interruptCtx, cancel := context.WithTimeout(context.Background(), forcedStopGrace)
-		err = m.adapter.Interrupt(interruptCtx, handle)
+		err = slot.adapter.Interrupt(interruptCtx, handle)
 		cancel()
 	}
 	if err != nil {
@@ -687,7 +829,7 @@ func (m *Manager) forceStopAfterDeadline(slot *managedRuntime, runID string, gen
 	handle, err := slot.activeHandle()
 	if err == nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), forcedStopGrace)
-		err = m.adapter.Stop(stopCtx, handle, runtimeapi.StopForce)
+		err = slot.adapter.Stop(stopCtx, handle, runtimeapi.StopForce)
 		cancel()
 	}
 	if err != nil {

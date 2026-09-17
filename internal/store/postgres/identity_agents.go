@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -39,6 +40,9 @@ func (s *Store) EnsureDevelopmentTenant(ctx context.Context, login string) (doma
 		if err != nil {
 			return mapError("upsert development organization", err)
 		}
+		if err := tx.QueryRow(ctx, `SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, organizationID).Scan(&organizationID); err != nil {
+			return mapError("lock development organization", err)
+		}
 
 		userID, err := newUUIDv7()
 		if err != nil {
@@ -59,18 +63,167 @@ func (s *Store) EnsureDevelopmentTenant(ctx context.Context, login string) (doma
 		if err != nil {
 			return mapError("upsert development user", err)
 		}
-		_, err = tx.Exec(ctx, `
+		inserted := true
+		err = tx.QueryRow(ctx, `
             INSERT INTO organization_members(organization_id, user_id, role, status)
-            VALUES ($1,$2,'owner','active')
-            ON CONFLICT (organization_id, user_id) DO UPDATE
-            SET role = 'owner', status = 'active'`, organizationID, result.ID)
+            SELECT $1, $2,
+                   CASE WHEN EXISTS (
+                       SELECT 1 FROM organization_members
+                       WHERE organization_id = $1
+                   ) THEN 'viewer' ELSE 'owner' END,
+                   'active'
+            ON CONFLICT (organization_id, user_id) DO NOTHING
+            RETURNING role`, organizationID, result.ID).Scan(&result.Role)
+		if errors.Is(err, pgx.ErrNoRows) {
+			inserted = false
+			err = tx.QueryRow(ctx, `
+                UPDATE organization_members SET status = 'active'
+                WHERE organization_id = $1 AND user_id = $2
+                RETURNING role`, organizationID, result.ID).Scan(&result.Role)
+		}
 		if err != nil {
 			return mapError("upsert development membership", err)
 		}
 		result.OrganizationID = organizationID
-		result.Role = "owner"
+		if inserted {
+			if err := insertAudit(ctx, tx, organizationID, "user", result.ID, "",
+				"member.joined", "user", result.ID, map[string]any{"role": result.Role}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+	return result, err
+}
+
+const memberSelect = `
+    SELECT u.id, om.organization_id, u.tailscale_login::text, u.display_name,
+           om.role, u.created_at
+    FROM organization_members om
+    JOIN users u ON u.id = om.user_id`
+
+func (s *Store) ListMembers(ctx context.Context, user domain.User) ([]domain.Member, error) {
+	if _, err := requireMembership(ctx, s.pool, user); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, memberSelect+`
+        WHERE om.organization_id = $1 AND om.status = 'active'
+        ORDER BY u.display_name, u.id`, user.OrganizationID)
+	if err != nil {
+		return nil, mapError("list members", err)
+	}
+	defer rows.Close()
+	result := make([]domain.Member, 0)
+	for rows.Next() {
+		member, err := scanMember(rows)
+		if err != nil {
+			return nil, mapError("scan member", err)
+		}
+		result = append(result, member)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapError("list members", err)
+	}
+	return result, nil
+}
+
+func (s *Store) UpdateMemberRole(ctx context.Context, user domain.User, memberID, role string) (domain.Member, error) {
+	role = strings.ToLower(strings.TrimSpace(role))
+	switch role {
+	case "owner", "admin", "operator", "viewer":
+	default:
+		return domain.Member{}, fmt.Errorf("%w: invalid organization role %q", storepkg.ErrInvalidState, role)
+	}
+	var result domain.Member
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		var organizationID string
+		if err := tx.QueryRow(ctx, `SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, user.OrganizationID).Scan(&organizationID); err != nil {
+			return mapError("lock member organization", err)
+		}
+		actorRole, err := requireRole(ctx, tx, user, "owner", "admin")
+		if err != nil {
+			return err
+		}
+		var currentRole string
+		err = tx.QueryRow(ctx, `
+            SELECT role FROM organization_members
+            WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`,
+			user.OrganizationID, memberID).Scan(&currentRole)
+		if err != nil {
+			return mapError("get member role", err)
+		}
+		if actorRole == "admin" && (currentRole == "owner" || role == "owner") {
+			return fmt.Errorf("%w: administrators cannot change owner roles", storepkg.ErrForbidden)
+		}
+		if currentRole == "owner" && role != "owner" {
+			var owners int
+			if err := tx.QueryRow(ctx, `
+                SELECT count(*) FROM organization_members
+                WHERE organization_id = $1 AND status = 'active' AND role = 'owner'`,
+				user.OrganizationID).Scan(&owners); err != nil {
+				return mapError("count organization owners", err)
+			}
+			if owners <= 1 {
+				return fmt.Errorf("%w: the last owner cannot be demoted", storepkg.ErrConflict)
+			}
+		}
+		if currentRole != role {
+			if _, err := tx.Exec(ctx, `
+                UPDATE organization_members SET role = $3
+                WHERE organization_id = $1 AND user_id = $2`, user.OrganizationID, memberID, role); err != nil {
+				return mapError("update member role", err)
+			}
+			if err := insertAudit(ctx, tx, user.OrganizationID, "user", user.ID, "",
+				"member.role_changed", "user", memberID,
+				map[string]any{"from": currentRole, "to": role}); err != nil {
+				return err
+			}
+		}
+		result, err = getMember(ctx, tx, user.OrganizationID, memberID)
+		return err
+	})
+	return result, err
+}
+
+func (s *Store) ListTeams(ctx context.Context, user domain.User) ([]domain.Team, error) {
+	if _, err := requireMembership(ctx, s.pool, user); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, `
+        SELECT id, organization_id, slug::text, name, COALESCE(description, ''), created_at, updated_at
+        FROM teams
+        WHERE organization_id = $1 AND deleted_at IS NULL
+        ORDER BY name, id`, user.OrganizationID)
+	if err != nil {
+		return nil, mapError("list teams", err)
+	}
+	defer rows.Close()
+	result := make([]domain.Team, 0)
+	for rows.Next() {
+		var team domain.Team
+		if err := rows.Scan(&team.ID, &team.OrganizationID, &team.Slug, &team.Name, &team.Description, &team.CreatedAt, &team.UpdatedAt); err != nil {
+			return nil, mapError("scan team", err)
+		}
+		result = append(result, team)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapError("list teams", err)
+	}
+	return result, nil
+}
+
+func getMember(ctx context.Context, q querier, organizationID, memberID string) (domain.Member, error) {
+	result, err := scanMember(q.QueryRow(ctx, memberSelect+`
+        WHERE om.organization_id = $1 AND om.user_id = $2 AND om.status = 'active'`, organizationID, memberID))
+	if err != nil {
+		return domain.Member{}, mapError("get member", err)
+	}
+	return result, nil
+}
+
+func scanMember(row scanner) (domain.Member, error) {
+	var result domain.Member
+	err := row.Scan(&result.ID, &result.OrganizationID, &result.Login, &result.DisplayName, &result.Role, &result.CreatedAt)
 	return result, err
 }
 
