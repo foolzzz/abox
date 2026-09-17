@@ -117,7 +117,7 @@ func printUntilTurnBoundary(ctx context.Context, eventStream <-chan runtimeapi.E
 			return ctx.Err()
 		case event, open := <-eventStream:
 			if !open {
-				return errors.New("Claude event stream closed before a turn boundary")
+				return errors.New("claude event stream closed before a turn boundary")
 			}
 			if err := encoder.Encode(event); err != nil {
 				return fmt.Errorf("write event: %w", err)

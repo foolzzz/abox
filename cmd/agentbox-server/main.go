@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -52,14 +53,21 @@ func run(logger *slog.Logger, configPath string) error {
 		return err
 	}
 
-	serveIdentity, err := identity.NewServeHeaderExtractor(identity.LoopbackTrust{})
+	var sourceTrust identity.SourceTrust = identity.LoopbackTrust{}
+	if len(configuration.TrustedProxyCIDRs) > 0 {
+		sourceTrust, err = identity.NewCIDRTrust(configuration.TrustedProxyCIDRs...)
+		if err != nil {
+			return fmt.Errorf("configure trusted proxy CIDRs: %w", err)
+		}
+	}
+	serveIdentity, err := identity.NewServeHeaderExtractor(sourceTrust)
 	if err != nil {
 		return err
 	}
 	developmentIdentity, err := identity.NewDevelopmentExtractor(configuration.EnableDevelopmentAuth, identity.Principal{
 		LoginName:   configuration.DevelopmentUser,
 		DisplayName: configuration.DevelopmentUser,
-	}, identity.LoopbackTrust{})
+	}, sourceTrust)
 	if err != nil {
 		return err
 	}
@@ -96,12 +104,12 @@ func run(logger *slog.Logger, configPath string) error {
 	if err != nil {
 		return err
 	}
-	defer httpListener.Close()
+	defer func() { _ = httpListener.Close() }()
 	grpcListener, err := net.Listen("tcp", configuration.GRPCAddr)
 	if err != nil {
 		return err
 	}
-	defer grpcListener.Close()
+	defer func() { _ = grpcListener.Close() }()
 
 	httpServer := &http.Server{
 		Handler:           controlPlane.Handler(),

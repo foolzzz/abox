@@ -423,7 +423,7 @@ func readSecureJSON(path string, destination any) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return err
@@ -494,7 +494,7 @@ func writeAtomic(path string, data []byte, mode os.FileMode) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	return dir.Sync()
 }
 

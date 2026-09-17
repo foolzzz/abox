@@ -210,7 +210,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(stateDirectory)
+	defer func() { _ = os.RemoveAll(stateDirectory) }()
 
 	listener := bufconn.Listen(bufferSize)
 	grpcServer := grpc.NewServer()
@@ -233,7 +233,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 
 	var frameNumber atomic.Uint64
 	newFrameID := func() string {
@@ -243,7 +243,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer journal.Close()
+	defer func() { _ = journal.Close() }()
 	ackStore, err := hostclient.NewFileAckStore(filepath.Join(stateDirectory, "acks.json"))
 	if err != nil {
 		return err
@@ -296,6 +296,7 @@ func run() error {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	clientErrors := make(chan error, 1)
 	go func() { clientErrors <- client.Run(ctx) }()
 

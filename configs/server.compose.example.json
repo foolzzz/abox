@@ -1,0 +1,26 @@
+{
+  "databaseUrl": "postgres://agentbox:replace-me@postgres:5432/agentbox?sslmode=disable",
+  "httpAddr": "0.0.0.0:8080",
+  "grpcAddr": "0.0.0.0:9443",
+  "publicUrl": "http://127.0.0.1:8080",
+  "developmentUser": "owner@example.com",
+  "trustedProxyCIDRs": ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+  "enableDevelopmentAuth": false,
+  "enrollmentToken": "replace-me",
+  "webDir": "/opt/agentbox/web",
+  "version": "0.3.0",
+  "approvalPollInterval": "1s",
+  "hibernationPollInterval": "30s",
+  "schedulePollInterval": "1s",
+  "retentionPollInterval": "1h",
+  "operationalRetention": "720h",
+  "auditRetention": "8760h",
+  "reaperBatchSize": 100,
+  "webhookSecret": "replace-me",
+  "enableCodex": true,
+  "enableClaude": false,
+  "runtimeModels": {
+    "omp": ["gpt-5.2", "claude-sonnet", "gemini-2.5-pro"],
+    "codex": ["gpt-5.3-codex", "gpt-5.2-codex"]
+  }
+}

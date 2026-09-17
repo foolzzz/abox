@@ -188,7 +188,7 @@ func readBoundedJSON(path string, limit int64, destination any) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return err
