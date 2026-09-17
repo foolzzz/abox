@@ -1,0 +1,388 @@
+package postgres
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"agentbox/internal/domain"
+	storepkg "agentbox/internal/store"
+
+	"github.com/jackc/pgx/v5"
+)
+
+const hostSelect = `
+    SELECT h.id, h.organization_id, h.name, h.slug, h.status, COALESCE(h.os, ''),
+           COALESCE(h.arch, ''), COALESCE(h.daemon_version, ''), h.labels,
+           h.last_seen_at, h.max_active_boxes,
+           COALESCE(ARRAY(
+               SELECT c.runtime_name
+               FROM host_runtime_capabilities c
+               WHERE c.host_id = h.id AND c.status = 'available'
+               ORDER BY c.runtime_name
+           ), ARRAY[]::text[])
+    FROM hosts h`
+
+const workspaceSelect = `
+    SELECT w.id, w.organization_id, w.host_id, w.name, w.real_path,
+           w.kind, w.status, w.created_at
+    FROM workspaces w`
+
+func (s *Store) ListHosts(ctx context.Context, user domain.User) ([]domain.Host, error) {
+	if _, err := requireMembership(ctx, s.pool, user); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, hostSelect+`
+        WHERE h.organization_id = $1 AND h.status <> 'revoked'
+        ORDER BY h.name, h.id`, user.OrganizationID)
+	if err != nil {
+		return nil, mapError("list hosts", err)
+	}
+	defer rows.Close()
+	result := make([]domain.Host, 0)
+	for rows.Next() {
+		host, err := scanHost(rows)
+		if err != nil {
+			return nil, mapError("scan host", err)
+		}
+		result = append(result, host)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapError("list hosts", err)
+	}
+	return result, nil
+}
+
+func (s *Store) UpsertHost(ctx context.Context, host domain.Host, daemonInstanceID string, lastAck uint64) (domain.Host, error) {
+	if host.ID == "" || host.OrganizationID == "" || daemonInstanceID == "" {
+		return domain.Host{}, fmt.Errorf("%w: host id, organization id, and daemon instance id are required", storepkg.ErrInvalidState)
+	}
+	ack, err := ackValue(lastAck)
+	if err != nil {
+		return domain.Host{}, err
+	}
+	labels, err := jsonValue(host.Labels, "{}")
+	if err != nil {
+		return domain.Host{}, err
+	}
+	if host.Name == "" {
+		host.Name = host.ID
+	}
+	if host.Slug == "" {
+		host.Slug = slugify(host.Name)
+	}
+	if host.Status == "" || host.Status == domain.HostEnrolling {
+		host.Status = domain.HostOnline
+	}
+	if host.MaxActiveBoxes == 0 {
+		host.MaxActiveBoxes = 4
+	}
+
+	var result domain.Host
+	err = s.withTx(ctx, func(tx pgx.Tx) error {
+		var creatorID string
+		err := tx.QueryRow(ctx, `
+            SELECT user_id
+            FROM organization_members
+            WHERE organization_id = $1 AND status = 'active' AND role IN ('owner', 'admin')
+            ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, joined_at
+            LIMIT 1`, host.OrganizationID).Scan(&creatorID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: host organization has no active administrator", storepkg.ErrForbidden)
+		}
+		if err != nil {
+			return mapError("find host creator", err)
+		}
+		tag, err := tx.Exec(ctx, `
+            INSERT INTO hosts(
+                id, organization_id, slug, name, status, os, arch, daemon_version,
+                current_daemon_instance_id, last_acked_host_seq, labels,
+                max_active_boxes, last_seen_at, created_by_user_id
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),$13)
+            ON CONFLICT (id) DO UPDATE SET
+                slug = EXCLUDED.slug,
+                name = EXCLUDED.name,
+                status = CASE WHEN hosts.status = 'revoked' THEN hosts.status ELSE EXCLUDED.status END,
+                os = EXCLUDED.os,
+                arch = EXCLUDED.arch,
+                daemon_version = EXCLUDED.daemon_version,
+                last_acked_host_seq = CASE
+                    WHEN hosts.current_daemon_instance_id IS DISTINCT FROM EXCLUDED.current_daemon_instance_id
+                    THEN EXCLUDED.last_acked_host_seq
+                    ELSE GREATEST(hosts.last_acked_host_seq, EXCLUDED.last_acked_host_seq)
+                END,
+                current_daemon_instance_id = EXCLUDED.current_daemon_instance_id,
+                labels = EXCLUDED.labels,
+                max_active_boxes = EXCLUDED.max_active_boxes,
+                last_seen_at = now(),
+                updated_at = now(),
+                version = hosts.version + 1
+            WHERE hosts.organization_id = EXCLUDED.organization_id`,
+			host.ID, host.OrganizationID, host.Slug, host.Name, host.Status,
+			nullableText(host.OS), nullableText(host.Arch), nullableText(host.DaemonVersion),
+			daemonInstanceID, ack, labels, host.MaxActiveBoxes, creatorID,
+		)
+		if err != nil {
+			return mapError("upsert host", err)
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("%w: host id belongs to another organization", storepkg.ErrConflict)
+		}
+
+		if _, err := tx.Exec(ctx, `
+            UPDATE host_runtime_capabilities
+            SET status = 'unavailable', last_checked_at = now(), error_message = NULL
+            WHERE host_id = $1`, host.ID); err != nil {
+			return mapError("reset host runtime capabilities", err)
+		}
+		for _, runtimeName := range host.Runtimes {
+			runtimeName = strings.TrimSpace(runtimeName)
+			if runtimeName == "" {
+				continue
+			}
+			_, err := tx.Exec(ctx, `
+                INSERT INTO host_runtime_capabilities(
+                    organization_id, host_id, runtime_name, capabilities, status,
+                    discovered_at, last_checked_at
+                ) VALUES ($1,$2,$3,'{}'::jsonb,'available',now(),now())
+                ON CONFLICT (host_id, runtime_name) DO UPDATE SET
+                    organization_id = EXCLUDED.organization_id,
+                    status = 'available', last_checked_at = now(), error_message = NULL`,
+				host.OrganizationID, host.ID, runtimeName)
+			if err != nil {
+				return mapError("upsert host runtime capability", err)
+			}
+		}
+		result, err = getHost(ctx, tx, host.OrganizationID, host.ID)
+		return err
+	})
+	return result, err
+}
+
+func (s *Store) TouchHost(ctx context.Context, hostID, daemonInstanceID string, lastAck uint64) error {
+	if hostID == "" || daemonInstanceID == "" {
+		return fmt.Errorf("%w: host and daemon instance ids are required", storepkg.ErrInvalidState)
+	}
+	ack, err := ackValue(lastAck)
+	if err != nil {
+		return err
+	}
+	tag, err := s.pool.Exec(ctx, `
+        UPDATE hosts
+        SET status = CASE WHEN status = 'revoked' THEN status ELSE 'online' END,
+            last_acked_host_seq = GREATEST(last_acked_host_seq, $3),
+            last_seen_at = now(), updated_at = now(), version = version + 1
+        WHERE id = $1 AND current_daemon_instance_id = $2`, hostID, daemonInstanceID, ack)
+	if err != nil {
+		return mapError("touch host", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+	var current *string
+	err = s.pool.QueryRow(ctx, `SELECT current_daemon_instance_id::text FROM hosts WHERE id = $1`, hostID).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("touch host: %w", storepkg.ErrNotFound)
+	}
+	if err != nil {
+		return mapError("read host daemon instance", err)
+	}
+	return fmt.Errorf("%w: stale daemon instance", storepkg.ErrConflict)
+}
+
+func (s *Store) GetHost(ctx context.Context, organizationID, id string) (domain.Host, error) {
+	return getHost(ctx, s.pool, organizationID, id)
+}
+
+func getHost(ctx context.Context, q querier, organizationID, id string) (domain.Host, error) {
+	result, err := scanHost(q.QueryRow(ctx, hostSelect+`
+        WHERE h.organization_id = $1 AND h.id = $2`, organizationID, id))
+	if err != nil {
+		return domain.Host{}, mapError("get host", err)
+	}
+	return result, nil
+}
+
+func scanHost(row scanner) (domain.Host, error) {
+	var result domain.Host
+	var labels []byte
+	err := row.Scan(
+		&result.ID, &result.OrganizationID, &result.Name, &result.Slug, &result.Status,
+		&result.OS, &result.Arch, &result.DaemonVersion, &labels,
+		&result.LastSeenAt, &result.MaxActiveBoxes, &result.Runtimes,
+	)
+	if err != nil {
+		return domain.Host{}, err
+	}
+	result.Labels = json.RawMessage(append([]byte(nil), labels...))
+	return result, nil
+}
+
+func (s *Store) ListWorkspaces(ctx context.Context, user domain.User) ([]domain.Workspace, error) {
+	role, err := requireMembership(ctx, s.pool, user)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, workspaceSelect+`
+        WHERE w.organization_id = $1 AND w.status <> 'archived'
+          AND (
+              $3 IN ('owner', 'admin')
+              OR EXISTS (
+                  SELECT 1 FROM workspace_acl wa
+                  WHERE wa.workspace_id = w.id AND wa.user_id = $2
+              )
+              OR EXISTS (
+                  SELECT 1 FROM workspace_acl wa
+                  JOIN team_members tm ON tm.team_id = wa.team_id AND tm.organization_id = wa.organization_id
+                  WHERE wa.workspace_id = w.id AND tm.user_id = $2
+              )
+          )
+        ORDER BY w.name, w.id`, user.OrganizationID, user.ID, role)
+	if err != nil {
+		return nil, mapError("list workspaces", err)
+	}
+	defer rows.Close()
+	result := make([]domain.Workspace, 0)
+	for rows.Next() {
+		workspace, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, mapError("scan workspace", err)
+		}
+		result = append(result, workspace)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapError("list workspaces", err)
+	}
+	return result, nil
+}
+
+func (s *Store) CreateWorkspace(ctx context.Context, user domain.User, input domain.CreateWorkspaceInput) (domain.Workspace, error) {
+	if input.HostID == "" || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Path) == "" {
+		return domain.Workspace{}, fmt.Errorf("%w: host, name, and path are required", storepkg.ErrInvalidState)
+	}
+	if input.Kind == "" {
+		input.Kind = "existing"
+	}
+	var result domain.Workspace
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := requireRole(ctx, tx, user, "owner", "admin"); err != nil {
+			return err
+		}
+		var hostStatus domain.HostStatus
+		err := tx.QueryRow(ctx, `
+            SELECT status FROM hosts
+            WHERE organization_id = $1 AND id = $2
+            FOR SHARE`, user.OrganizationID, input.HostID).Scan(&hostStatus)
+		if err != nil {
+			return mapError("get workspace host", err)
+		}
+		if hostStatus == domain.HostRevoked || hostStatus == domain.HostDraining {
+			return fmt.Errorf("%w: host is %s", storepkg.ErrInvalidState, hostStatus)
+		}
+
+		rootID, err := newUUIDv7()
+		if err != nil {
+			return err
+		}
+		rootMode := "both"
+		if input.Kind == "existing" {
+			rootMode = "existing"
+		}
+		err = tx.QueryRow(ctx, `
+            INSERT INTO host_workspace_roots(
+                id, organization_id, host_id, display_path, real_path, mode, enabled
+            ) VALUES ($1,$2,$3,$4,$4,$5,true)
+            ON CONFLICT (host_id, real_path) DO UPDATE
+            SET enabled = true, updated_at = now()
+            RETURNING id`, rootID, user.OrganizationID, input.HostID, input.Path, rootMode).Scan(&rootID)
+		if err != nil {
+			return mapError("ensure workspace root", err)
+		}
+
+		workspaceID, err := newUUIDv7()
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+            INSERT INTO workspaces(
+                id, organization_id, host_id, workspace_root_id, name, kind,
+                display_path, real_path, status, created_by_user_id
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,'ready',$8)`,
+			workspaceID, user.OrganizationID, input.HostID, rootID,
+			strings.TrimSpace(input.Name), input.Kind, input.Path, user.ID)
+		if err != nil {
+			return mapError("insert workspace", err)
+		}
+		aclID, err := newUUIDv7()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+            INSERT INTO workspace_acl(
+                id, organization_id, workspace_id, user_id, role, created_by_user_id
+            ) VALUES ($1,$2,$3,$4,'owner',$4)`,
+			aclID, user.OrganizationID, workspaceID, user.ID); err != nil {
+			return mapError("insert workspace owner acl", err)
+		}
+		if err := insertAudit(ctx, tx, user.OrganizationID, "user", user.ID, "",
+			"workspace.created", "workspace", workspaceID,
+			map[string]any{"hostId": input.HostID, "path": input.Path}); err != nil {
+			return err
+		}
+		result, err = getWorkspace(ctx, tx, user.OrganizationID, workspaceID)
+		return err
+	})
+	return result, err
+}
+
+func (s *Store) GetWorkspace(ctx context.Context, organizationID, id string) (domain.Workspace, error) {
+	return getWorkspace(ctx, s.pool, organizationID, id)
+}
+
+func getWorkspace(ctx context.Context, q querier, organizationID, id string) (domain.Workspace, error) {
+	result, err := scanWorkspace(q.QueryRow(ctx, workspaceSelect+`
+        WHERE w.organization_id = $1 AND w.id = $2`, organizationID, id))
+	if err != nil {
+		return domain.Workspace{}, mapError("get workspace", err)
+	}
+	return result, nil
+}
+
+func scanWorkspace(row scanner) (domain.Workspace, error) {
+	var result domain.Workspace
+	err := row.Scan(
+		&result.ID, &result.OrganizationID, &result.HostID, &result.Name,
+		&result.Path, &result.Kind, &result.Status, &result.CreatedAt,
+	)
+	return result, err
+}
+
+func canOperateWorkspace(ctx context.Context, q querier, user domain.User, workspaceID string) (bool, error) {
+	role, err := requireMembership(ctx, q, user)
+	if err != nil {
+		return false, err
+	}
+	if role == "owner" || role == "admin" {
+		return true, nil
+	}
+	var allowed bool
+	err = q.QueryRow(ctx, `
+        SELECT EXISTS (
+            SELECT 1 FROM workspace_acl wa
+            WHERE wa.organization_id = $1 AND wa.workspace_id = $2
+              AND wa.role IN ('owner', 'operator')
+              AND (
+                  wa.user_id = $3
+                  OR wa.team_id IN (
+                      SELECT tm.team_id FROM team_members tm
+                      WHERE tm.organization_id = $1 AND tm.user_id = $3
+                  )
+              )
+        )`, user.OrganizationID, workspaceID, user.ID).Scan(&allowed)
+	if err != nil {
+		return false, mapError("check workspace acl", err)
+	}
+	return allowed, nil
+}

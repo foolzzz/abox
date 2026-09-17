@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AgentBox">
+  <rect width="512" height="512" rx="116" fill="#0b0f17"/>
+  <path d="M256 74 414 165v182L256 438 98 347V165L256 74Z" fill="#151d2a" stroke="#55d6be" stroke-width="22"/>
+  <path d="m167 306 89-154 89 154h-55l-34-61-34 61h-55Z" fill="#f5f7fb"/>
+  <circle cx="256" cy="338" r="24" fill="#ffb86b"/>
+</svg>

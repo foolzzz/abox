@@ -1,0 +1,61 @@
+CREATE TABLE host_commands (
+    id UUID PRIMARY KEY,
+    organization_id UUID NOT NULL,
+    host_id UUID NOT NULL,
+    box_id UUID,
+    run_id UUID,
+    runtime_instance_id UUID,
+    command_type TEXT NOT NULL CHECK (command_type IN (
+        'runtime.start', 'runtime.prompt', 'runtime.steer', 'runtime.follow_up',
+        'runtime.interrupt', 'runtime.approval_response', 'runtime.stop', 'runtime.inspect'
+    )),
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    idempotency_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'leased', 'accepted', 'running', 'completed', 'failed', 'cancelled')),
+    attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+    max_attempts INTEGER NOT NULL DEFAULT 20 CHECK (max_attempts > 0),
+    available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_owner TEXT,
+    lease_until TIMESTAMPTZ,
+    accepted_at TIMESTAMPTZ,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error_code TEXT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (host_id, idempotency_key),
+    FOREIGN KEY (organization_id, host_id) REFERENCES hosts(organization_id, id),
+    FOREIGN KEY (organization_id, box_id) REFERENCES boxes(organization_id, id),
+    FOREIGN KEY (organization_id, box_id, run_id) REFERENCES runs(organization_id, box_id, id),
+    FOREIGN KEY (organization_id, box_id, runtime_instance_id)
+        REFERENCES runtime_instances(organization_id, box_id, id),
+    CHECK (run_id IS NULL OR box_id IS NOT NULL),
+    CHECK (runtime_instance_id IS NULL OR box_id IS NOT NULL)
+);
+
+CREATE TABLE box_events (
+    organization_id UUID NOT NULL,
+    box_id UUID NOT NULL,
+    seq BIGINT NOT NULL CHECK (seq > 0),
+    event_id UUID NOT NULL UNIQUE,
+    host_id UUID,
+    daemon_event_id UUID,
+    runtime_seq BIGINT,
+    run_id UUID,
+    runtime_instance_id UUID,
+    event_type TEXT NOT NULL,
+    actor_kind TEXT NOT NULL CHECK (actor_kind IN ('user', 'main_agent', 'subagent', 'system', 'daemon')),
+    actor_id TEXT,
+    payload JSONB NOT NULL,
+    runtime_payload JSONB,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (box_id, seq),
+    FOREIGN KEY (organization_id, box_id) REFERENCES boxes(organization_id, id),
+    FOREIGN KEY (organization_id, host_id) REFERENCES hosts(organization_id, id),
+    FOREIGN KEY (organization_id, box_id, run_id) REFERENCES runs(organization_id, box_id, id),
+    FOREIGN KEY (organization_id, box_id, runtime_instance_id)
+        REFERENCES runtime_instances(organization_id, box_id, id),
+    CHECK (daemon_event_id IS NULL OR host_id IS NOT NULL)
+);
