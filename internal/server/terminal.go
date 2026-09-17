@@ -126,7 +126,7 @@ func (s *Server) handleTerminal(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		return
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 
 	sessionID := uuid.NewString()
 	subscription := s.terminals.register(sessionID, box.HostID)

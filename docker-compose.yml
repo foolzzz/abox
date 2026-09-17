@@ -1,19 +1,48 @@
+name: agentbox
+
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: agentbox
-      POSTGRES_PASSWORD: agentbox
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to match databaseUrl in AGENTBOX_SERVER_CONFIG}
       POSTGRES_DB: agentbox
-    ports:
-      - "54329:5432"
+    expose:
+      - "5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agentbox -d agentbox"]
-      interval: 2s
-      timeout: 2s
+      interval: 5s
+      timeout: 3s
       retries: 30
+      start_period: 10s
     volumes:
       - agentbox-postgres:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+
+  control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agentbox-control-plane:${AGENTBOX_IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["--config", "/etc/agentbox/server.json"]
+    volumes:
+      - ${AGENTBOX_SERVER_CONFIG:?set AGENTBOX_SERVER_CONFIG to a chmod 600 JSON config}:/etc/agentbox/server.json:ro
+    ports:
+      - "${AGENTBOX_HTTP_BIND:-127.0.0.1}:${AGENTBOX_HTTP_PORT:-8080}:8080"
+      - "${AGENTBOX_GRPC_BIND:-127.0.0.1}:${AGENTBOX_GRPC_PORT:-9443}:9443"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   agentbox-postgres:

@@ -121,7 +121,7 @@ func LoadConfig(path string) (Config, error) {
 		}
 		return Config{}, fmt.Errorf("open agentboxd config: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
 	var raw daemonFileConfig

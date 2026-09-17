@@ -18,6 +18,7 @@ type Config struct {
 	PublicURL               string
 	DevelopmentUser         string
 	EnableDevelopmentAuth   bool
+	TrustedProxyCIDRs       []string
 	EnrollmentToken         string
 	WebDir                  string
 	Version                 string
@@ -40,6 +41,7 @@ type fileConfig struct {
 	GRPCAddr                string              `json:"grpcAddr"`
 	PublicURL               string              `json:"publicUrl"`
 	DevelopmentUser         string              `json:"developmentUser"`
+	TrustedProxyCIDRs       []string            `json:"trustedProxyCIDRs"`
 	EnableDevelopmentAuth   bool                `json:"enableDevelopmentAuth"`
 	EnrollmentToken         string              `json:"enrollmentToken"`
 	WebDir                  string              `json:"webDir"`
@@ -89,7 +91,7 @@ func Load(path string) (Config, error) {
 		}
 		return Config{}, fmt.Errorf("open server config: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return Config{}, fmt.Errorf("stat server config: %w", err)
@@ -153,6 +155,7 @@ func Load(path string) (Config, error) {
 		EnrollmentToken:       raw.EnrollmentToken, WebDir: webDir, Version: raw.Version,
 		ApprovalPollInterval: approval, HibernationPollInterval: hibernation,
 		SchedulePollInterval: schedule, RetentionPollInterval: retentionPoll,
+		TrustedProxyCIDRs:    append([]string(nil), raw.TrustedProxyCIDRs...),
 		OperationalRetention: operationalRetention, AuditRetention: auditRetention,
 		ReaperBatchSize: raw.ReaperBatchSize, WebhookSecret: raw.WebhookSecret,
 		EnableCodex: enableCodex, EnableClaude: raw.EnableClaude,

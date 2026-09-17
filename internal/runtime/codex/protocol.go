@@ -173,7 +173,7 @@ func (h *processHandle) request(ctx context.Context, method string, params any) 
 		return nil, &Error{Op: "request", Code: codeRequestTimeout, Method: method, Err: ctx.Err()}
 	case <-h.done:
 		h.removePending(id)
-		return nil, &Error{Op: "request", Code: codeRuntimeStopped, Method: method, Err: errors.New("Codex app-server exited before responding")}
+		return nil, &Error{Op: "request", Code: codeRuntimeStopped, Method: method, Err: errors.New("codex app-server exited before responding")}
 	}
 }
 
@@ -200,7 +200,7 @@ func (h *processHandle) writeLine(ctx context.Context, wire []byte) error {
 	}
 	select {
 	case <-h.done:
-		return errors.New("Codex app-server has exited")
+		return errors.New("codex app-server has exited")
 	default:
 	}
 	payload := make([]byte, len(wire)+1)
@@ -318,7 +318,7 @@ func (h *processHandle) routeResponse(message rpcEnvelope) error {
 		pending <- rpcResult{err: &Error{
 			Op:   "response",
 			Code: codeRequestFailed,
-			Err:  fmt.Errorf("Codex JSON-RPC error %d: %s", message.Error.Code, boundedText(message.Error.Message, 1024)),
+			Err:  fmt.Errorf("codex JSON-RPC error %d: %s", message.Error.Code, boundedText(message.Error.Message, 1024)),
 		}}
 		return nil
 	}
@@ -395,7 +395,7 @@ func (h *processHandle) waitProcess() {
 	if cause == nil && waitErr != nil {
 		cause = waitErr
 	}
-	h.failPending(&Error{Op: "wait", Code: codeRuntimeStopped, Err: firstError(cause, errors.New("Codex app-server exited"))})
+	h.failPending(&Error{Op: "wait", Code: codeRuntimeStopped, Err: firstError(cause, errors.New("codex app-server exited"))})
 	if currentRunID != "" && previousStatus == "busy" {
 		h.emitForRun(currentRunID, events.RunFailed, "daemon", "", map[string]any{
 			"reason": "runtime_exited",
@@ -493,10 +493,10 @@ func (h *processHandle) prepareTurn(runID string) (string, string, error) {
 	h.stateMu.Lock()
 	defer h.stateMu.Unlock()
 	if h.status == "exited" || h.status == "stopping" {
-		return "", "", &Error{Op: "send", Code: codeRuntimeStopped, Err: errors.New("Codex runtime is not active")}
+		return "", "", &Error{Op: "send", Code: codeRuntimeStopped, Err: errors.New("codex runtime is not active")}
 	}
 	if h.threadID == "" {
-		return "", "", &Error{Op: "send", Code: codeProtocol, Err: errors.New("Codex thread id is unavailable")}
+		return "", "", &Error{Op: "send", Code: codeProtocol, Err: errors.New("codex thread id is unavailable")}
 	}
 	active := h.activeTurnID
 	if active == "" {
@@ -522,10 +522,10 @@ func (h *processHandle) prepareSteer(runID string) (string, string, error) {
 	h.stateMu.Lock()
 	defer h.stateMu.Unlock()
 	if h.status == "exited" || h.status == "stopping" {
-		return "", "", &Error{Op: "steer", Code: codeRuntimeStopped, Err: errors.New("Codex runtime is not active")}
+		return "", "", &Error{Op: "steer", Code: codeRuntimeStopped, Err: errors.New("codex runtime is not active")}
 	}
 	if h.threadID == "" || h.activeTurnID == "" {
-		return "", "", &Error{Op: "steer", Code: codeRequestFailed, Err: errors.New("Codex has no active turn to steer")}
+		return "", "", &Error{Op: "steer", Code: codeRequestFailed, Err: errors.New("codex has no active turn to steer")}
 	}
 	if runID != "" {
 		h.currentRunID = runID

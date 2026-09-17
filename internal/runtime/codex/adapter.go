@@ -110,7 +110,7 @@ func (a *Adapter) Probe(ctx context.Context) (string, runtimeapi.Capabilities, e
 		return version, adapterCapabilities, &Error{Op: "probe", Code: codeProtocol, Method: "account/read", Err: fmt.Errorf("decode account status: %w", err)}
 	}
 	if account.RequiresOpenAIAuth && isJSONNull(account.Account) {
-		return version, adapterCapabilities, &Error{Op: "probe", Code: codeAuthentication, Err: errors.New("Codex is not logged in; run codex login as the daemon system user")}
+		return version, adapterCapabilities, &Error{Op: "probe", Code: codeAuthentication, Err: errors.New("codex is not logged in; run codex login as the daemon system user")}
 	}
 	return version, adapterCapabilities, nil
 }
@@ -143,7 +143,7 @@ func (a *Adapter) probeVersion(ctx context.Context) (string, error) {
 	}
 	version := firstLine(stdout.String())
 	if version == "" {
-		return "", &Error{Op: "probe", Code: codeProtocol, Err: errors.New("Codex returned an empty version")}
+		return "", &Error{Op: "probe", Code: codeProtocol, Err: errors.New("codex returned an empty version")}
 	}
 	return version, nil
 }
@@ -261,10 +261,10 @@ func (a *Adapter) Send(ctx context.Context, handle runtimeapi.Handle, input runt
 	if len(input.Payload) > 0 {
 		var payload map[string]json.RawMessage
 		if err := json.Unmarshal(input.Payload, &payload); err != nil || payload == nil {
-			return &Error{Op: "send", Code: codeInvalidSpec, Err: errors.New("Codex input payload must be a JSON object")}
+			return &Error{Op: "send", Code: codeInvalidSpec, Err: errors.New("codex input payload must be a JSON object")}
 		}
 		if len(payload) != 0 {
-			return &Error{Op: "send", Code: codeUnsupportedInput, Err: errors.New("Codex text input does not accept an auxiliary payload")}
+			return &Error{Op: "send", Code: codeUnsupportedInput, Err: errors.New("codex text input does not accept an auxiliary payload")}
 		}
 	}
 
@@ -321,7 +321,7 @@ func (a *Adapter) Send(ctx context.Context, handle runtimeapi.Handle, input runt
 		_, err = h.request(ctx, "turn/steer", params)
 		return err
 	case runtimeapi.InputApprovalResponse:
-		return &Error{Op: "send", Code: codeUnsupportedInput, Err: errors.New("Codex interactive approvals are disabled; the adapter runs with approvalPolicy=never")}
+		return &Error{Op: "send", Code: codeUnsupportedInput, Err: errors.New("codex interactive approvals are disabled; the adapter runs with approvalPolicy=never")}
 	default:
 		return &Error{Op: "send", Code: codeUnsupportedInput, Err: fmt.Errorf("unsupported input kind %q", input.Kind)}
 	}
@@ -423,7 +423,7 @@ func (a *Adapter) readSystemPrompt(path string) (string, error) {
 	if err != nil {
 		return "", &Error{Op: "start", Code: codeInvalidSpec, Err: fmt.Errorf("open system prompt: %w", err)}
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	limited := io.LimitReader(file, int64(a.config.MaxPromptBytes)+1)
 	content, err := io.ReadAll(limited)
 	if err != nil {
@@ -448,7 +448,7 @@ func (a *Adapter) stopFailedStart(h *processHandle) {
 
 func validateEnvironmentOverrides(overrides map[string]string) error {
 	if len(overrides) != 0 {
-		return &Error{Op: "start", Code: codeInvalidSpec, Err: errors.New("Codex V1 does not accept remote environment overrides; authentication and configuration come from the daemon system user")}
+		return &Error{Op: "start", Code: codeInvalidSpec, Err: errors.New("codex V1 does not accept remote environment overrides; authentication and configuration come from the daemon system user")}
 	}
 	return nil
 }

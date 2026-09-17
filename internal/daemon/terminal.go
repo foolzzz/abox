@@ -171,7 +171,7 @@ func (m *TerminalManager) terminalCommand(ctx context.Context, input *hostv1.Ter
 		return command, "", nil
 	}
 	if strings.TrimSpace(input.GetBoxId()) == "" || strings.TrimSpace(input.GetRuntimeType()) == "" {
-		return nil, "", errors.New("Agent Terminal requires boxId and runtimeType")
+		return nil, "", errors.New("agent terminal requires boxId and runtimeType")
 	}
 	tmuxSession := tmuxSessionName(input.GetBoxId())
 	if err := m.ensureAgentSession(ctx, tmuxSession, workspace, input.GetRuntimeType()); err != nil {

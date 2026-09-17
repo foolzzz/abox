@@ -428,28 +428,6 @@ func applyEventProjectionTx(ctx context.Context, tx pgx.Tx, event domain.BoxEven
 	return nil
 }
 
-func enqueueReadyRunInput(ctx context.Context, tx pgx.Tx, event domain.BoxEvent) error {
-	var organizationID, hostID, runID, messageID, delivery, text string
-	var presentationContext []byte
-	err := tx.QueryRow(ctx, `
-        SELECT r.organization_id, b.host_id, r.id, m.id, m.delivery, COALESCE(m.plain_text, ''), m.presentation_context
-        FROM runs r
-        JOIN boxes b ON b.id = r.box_id
-        JOIN messages m ON m.id = r.trigger_message_id
-        WHERE r.box_id = $1 AND r.runtime_instance_id = $2 AND r.status = 'dispatching'
-        ORDER BY r.queued_at LIMIT 1`, event.BoxID, event.RuntimeInstanceID).Scan(
-		&organizationID, &hostID, &runID, &messageID, &delivery, &text, &presentationContext)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return mapError("load ready runtime run", err)
-	}
-	_, err = createInputCommandTx(ctx, tx, organizationID, hostID, event.BoxID,
-		runID, event.RuntimeInstanceID, messageID, domain.Delivery(delivery), text, presentationContext)
-	return err
-}
-
 func projectApprovalRequest(ctx context.Context, tx pgx.Tx, event domain.BoxEvent) error {
 	if event.RunID == "" || event.RuntimeInstanceID == "" {
 		return nil
@@ -640,14 +618,15 @@ func projectRuntimeSnapshot(ctx context.Context, tx pgx.Tx, event domain.BoxEven
         WHERE id = $1 AND box_id = $4`, event.RuntimeInstanceID, projected, event.OccurredAt, event.BoxID); err != nil {
 		return mapError("project runtime snapshot", err)
 	}
-	if projected == "busy" {
+	switch projected {
+	case "busy":
 		if _, err := tx.Exec(ctx, `UPDATE runs SET status = 'running', version = version + 1 WHERE box_id = $1 AND runtime_instance_id = $2 AND status = 'disconnected'`, event.BoxID, event.RuntimeInstanceID); err != nil {
 			return mapError("reconnect running run", err)
 		}
 		if _, err := tx.Exec(ctx, `UPDATE boxes SET status = 'running', updated_at = now(), version = version + 1 WHERE id = $1 AND status <> 'terminated'`, event.BoxID); err != nil {
 			return mapError("reconnect running box", err)
 		}
-	} else if projected == "ready" {
+	case "ready":
 		if _, err := tx.Exec(ctx, `UPDATE runs SET status = 'lost', finished_at = $3, terminal_reason = 'host_reconnected_runtime_idle', version = version + 1 WHERE box_id = $1 AND runtime_instance_id = $2 AND status = 'disconnected'`, event.BoxID, event.RuntimeInstanceID, event.OccurredAt); err != nil {
 			return mapError("resolve disconnected run", err)
 		}

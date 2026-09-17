@@ -21,6 +21,8 @@
 
 `agentbox-web` 与 `agentbox-server` 是独立开发组件；首版允许 Web 静态资源嵌入 Server 进行单点部署。
 
+部署约束：除 `agentboxd` 外，Control Plane 组件统一由 Docker Compose 部署。`agentbox-server` 镜像包含已构建的 Web 静态资源；PostgreSQL 独立容器持久化。`agentboxd` 必须原生运行在 Execution Host，访问系统 OMP/Codex/tmux、项目目录和用户认证。
+
 ## 3. 网络与远程访问
 
 - 所有 Client、Server 和 Host 位于同一个 Tailscale Tailnet。
@@ -198,6 +200,9 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 
 ### 13.1 组件与部署
 
+- [x] Control Plane Docker 镜像采用多阶段构建和 non-root distroless Runtime。
+- [x] Docker Compose 能启动 PostgreSQL 与 Server/Web Control Plane，原生 daemon 可通过映射的 gRPC 端口注册。
+- [x] GitHub PR 与 `main` merge 后运行 Security、CodeQL、Secret Scan、Dependency Review、Trivy 和 Go CI/golangci-lint。
 - [x] Web、Server、daemon 独立构建。
 - [x] Server 可嵌入 Web 静态资源单点部署。
 - [x] Server 配置完全来自配置文件。

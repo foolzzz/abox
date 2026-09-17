@@ -275,7 +275,7 @@ func (s *Server) handleDownloadArtifact(writer http.ResponseWriter, request *htt
 		writeProblem(writer, http.StatusServiceUnavailable, "artifact_unavailable", "artifact content is unavailable on the control plane")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		writeProblem(writer, http.StatusServiceUnavailable, "artifact_unavailable", "artifact content is not a regular file")
