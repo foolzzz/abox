@@ -11,6 +11,6 @@
     "web:test": "npm --workspace apps/web run test"
   },
   "devDependencies": {
-    "ws": "^8.18.3"
+    "ws": "^8.21.0"
   }
 }
