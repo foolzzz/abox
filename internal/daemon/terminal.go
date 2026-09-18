@@ -193,6 +193,9 @@ func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, w
 	default:
 		return fmt.Errorf("runtime %q does not support native Agent Terminal", runtimeType)
 	}
+	if model := strings.TrimSpace(input.GetModel()); model != "" {
+		runtimeCommand = append(runtimeCommand, "--model", model)
+	}
 	args := []string{"new-session", "-d", "-s", sessionName, "-c", workspace, "--"}
 	args = append(args, runtimeCommand...)
 	output, err := exec.CommandContext(ctx, m.tmuxBinary, args...).CombinedOutput()

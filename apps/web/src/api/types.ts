@@ -25,8 +25,6 @@ export type RunStatus =
   | "aborted"
   | "lost"
   | "cancelled";
-export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
-export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export interface CurrentUser {
   id: string;
@@ -151,6 +149,8 @@ export interface Box {
   agentId: string;
   hostId: string;
   workspaceId: string;
+  model?: string;
+  visibility: "private" | "org";
   status: BoxStatus;
   ownerUserId?: string;
   runtimeType?: RuntimeType | string;
@@ -163,6 +163,7 @@ export interface Box {
 export interface CreateBoxRequest {
   name: string;
   agentId: string;
+  model?: string;
   hostId: string;
   workspaceId: string;
 }
@@ -187,20 +188,6 @@ export interface Run {
 }
 
 
-export interface Approval {
-  id: string;
-  boxId: string;
-  runId: string;
-  toolName: string;
-  riskLevel: RiskLevel;
-  status: ApprovalStatus;
-  payload?: Record<string, unknown>;
-  expiresAt: string;
-  requestedAt?: string;
-  resolvedAt?: string | null;
-  resolvedByUserId?: string | null;
-  decisionPayload?: Record<string, unknown> | null;
-}
 
 export type ScheduleStatus = "active" | "paused" | "deleted";
 export type ConcurrencyPolicy = "skip" | "queue" | "replace";
@@ -330,9 +317,6 @@ export interface PendingWorkspaceDiff {
   requestId: string;
 }
 
-export interface ApprovalDecisionRequest {
-  decision: "approved" | "denied";
-}
 
 
 export interface ApiErrorBody {

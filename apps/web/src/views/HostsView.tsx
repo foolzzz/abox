@@ -1,11 +1,19 @@
-import { api } from "../api/client";
+import { useState } from "react";
+import { api, errorMessage } from "../api/client";
+import type { Host } from "../api/types";
 import { Icon } from "../components/Icon";
-import { EmptyState, ErrorState, InlineAlert, LoadingState, PageHeader, RefreshButton, StatusChip } from "../components/ui";
+import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, Modal, PageHeader, RefreshButton, StatusChip } from "../components/ui";
 import { useResource } from "../hooks/useResource";
+import { roleAtLeast, useAccess } from "../lib/access";
 import { relativeTime } from "../lib/format";
 
 export function HostsView() {
+  const { currentUser } = useAccess();
+  const canDelete = roleAtLeast(currentUser?.role, "admin");
   const resource = useResource((signal) => api.listHosts(signal), []);
+  const [deletingHost, setDeletingHost] = useState<Host>();
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
 
   if (resource.loading) return <LoadingState label="Loading host fleet" />;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
@@ -31,11 +39,13 @@ export function HostsView() {
                   <div><dt>Last seen</dt><dd>{relativeTime(host.lastSeenAt)}</dd></div>
                   <div><dt>Capacity</dt><dd>{host.maxActiveBoxes ?? "—"} boxes</dd></div>
                 </dl>
+                {canDelete && host.status === "offline" ? <div className="resource-card__actions"><Button variant="danger" icon="trash" onClick={() => setDeletingHost(host)}>Delete host</Button></div> : null}
               </article>
             ))}
           </section>
         </>
       ) : <EmptyState icon="host" title="No hosts enrolled" description="Start an AgentBox daemon to enroll an execution host." />}
+      <Modal open={Boolean(deletingHost)} title={`Delete ${deletingHost?.name ?? "host"}?`} description="Revoke this offline execution host and remove it from the fleet." onClose={() => !deleteBusy && setDeletingHost(undefined)} size="small"><div className="confirm-dialog">{deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}<InlineAlert tone="warning">Hosts with active Boxes or registered Workspaces cannot be deleted. A revoked daemon credential cannot reconnect.</InlineAlert><div className="modal__actions"><Button disabled={deleteBusy} onClick={() => setDeletingHost(undefined)}>Cancel</Button><Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => { if (!deletingHost) return; setDeleteBusy(true); setDeleteError(undefined); void api.deleteHost(deletingHost.id).then(() => { resource.setData((current) => current?.filter((host) => host.id !== deletingHost.id)); setDeletingHost(undefined); }, (error: unknown) => setDeleteError(errorMessage(error))).finally(() => setDeleteBusy(false)); }}>Delete host</Button></div></div></Modal>
     </div>
   );
 }

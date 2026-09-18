@@ -21,6 +21,7 @@ interface AgentListData {
 export function AgentsView() {
   const { currentUser, meta } = useAccess();
   const { t } = useI18n();
+  const { notify } = useToast();
   const location = useLocation();
   const resource = useResource<AgentListData>(async (signal) => {
     const [agents, hosts] = await Promise.all([api.listAgents(signal), api.listHosts(signal)]);
@@ -28,6 +29,9 @@ export function AgentsView() {
   }, []);
   const canCreate = roleAtLeast(currentUser?.role, "admin");
   const createOpen = canCreate && new URLSearchParams(location.search).get("create") === "1";
+  const [deletingAgent, setDeletingAgent] = useState<Agent>();
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
   const runtimeTypes = meta ? meta.enabledRuntimes : DEFAULT_RUNTIME_TYPES;
 
   if (resource.loading) return <LoadingState label={t("agents.load")} />;
@@ -47,7 +51,7 @@ export function AgentsView() {
       {!canCreate ? <p className="permission-caption">Only administrators can create agent definitions.</p> : null}
       {visibleAgents.length ? (
         <section className="card-grid" aria-label="Agent definitions">
-          {visibleAgents.map((agent) => <AgentCard agent={agent} key={agent.id} />)}
+          {visibleAgents.map((agent) => <AgentCard agent={agent} canDelete={canCreate} onDelete={() => setDeletingAgent(agent)} key={agent.id} />)}
         </section>
       ) : (
         <EmptyState icon="agent" title={t("agents.empty")} description={t(canCreate ? "agents.emptyAdmin" : "agents.emptyViewer")} action={canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/agents?create=1")}>{t("agents.new")}</Button> : undefined} />
@@ -63,11 +67,12 @@ export function AgentsView() {
           navigate("/agents", { replace: true });
         }}
       />
+      <Modal open={Boolean(deletingAgent)} title={`Delete ${deletingAgent?.name ?? "Agent"}?`} description="The definition will be archived and removed from the Agent list." onClose={() => !deleteBusy && setDeletingAgent(undefined)} size="small"><div className="confirm-dialog">{deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}<InlineAlert tone="warning">Agents used by active Boxes or Schedules cannot be deleted.</InlineAlert><div className="modal__actions"><Button disabled={deleteBusy} onClick={() => setDeletingAgent(undefined)}>Cancel</Button><Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => { if (!deletingAgent) return; setDeleteBusy(true); setDeleteError(undefined); void api.deleteAgent(deletingAgent.id).then(() => { resource.setData((current) => current ? { ...current, agents: current.agents.filter((agent) => agent.id !== deletingAgent.id) } : current); notify(`${deletingAgent.name} was deleted.`); setDeletingAgent(undefined); }, (error: unknown) => setDeleteError(errorMessage(error))).finally(() => setDeleteBusy(false)); }}>Delete Agent</Button></div></div></Modal>
     </div>
   );
 }
 
-function AgentCard({ agent }: { agent: Agent }) {
+function AgentCard({ agent, canDelete, onDelete }: { agent: Agent; canDelete: boolean; onDelete: () => void }) {
   const { t } = useI18n();
   return (
     <article className="resource-card">
@@ -78,12 +83,13 @@ function AgentCard({ agent }: { agent: Agent }) {
       <div className="resource-card__body">
         <h2>{agent.name}</h2>
         <p className="resource-card__subtitle">{agent.model || t("agents.defaultModel")}</p>
-        <p className="resource-card__description">{agent.systemPrompt}</p>
+        <p className="resource-card__description">{agent.systemPrompt || "Runtime CLI default System Prompt"}</p>
       </div>
       <dl className="resource-card__facts">
         <div><dt>{t("agents.version")}</dt><dd>v{agent.version}</dd></div>
         <div><dt>{t("agents.updated")}</dt><dd>{formatDate(agent.updatedAt ?? agent.createdAt)}</dd></div>
       </dl>
+      {canDelete ? <div className="resource-card__actions"><Button variant="ghost" icon="trash" onClick={onDelete}>Delete</Button></div> : null}
     </article>
   );
 }
@@ -144,8 +150,8 @@ function CreateAgentModal({ open, hosts, runtimeTypes, runtimeModels, onClose, o
         </fieldset>
         {selectedRuntimeHosts === 0 ? <InlineAlert tone="warning">{t("agents.unavailable", { runtime: RUNTIME_LABELS[runtimeType] })}</InlineAlert> : null}
         <label className="field"><span>{t("agents.model")} <em>{t("common.optional")}</em></span><input list={`agent-model-suggestions-${runtimeType}`} value={model} onChange={(event) => setModel(event.target.value)} /><datalist id={`agent-model-suggestions-${runtimeType}`}>{modelSuggestions.map((suggestion) => <option key={suggestion} value={suggestion} />)}</datalist><small>{t("agents.modelHint", { runtime: RUNTIME_LABELS[runtimeType] })}</small></label>
-        <label className="field"><span>{t("agents.instructions")}</span><textarea required rows={9} value={systemPrompt} onChange={(event) => setSystemPrompt(event.target.value)} /><small>{t("agents.instructionsHint")}</small></label>
-        <div className="modal__actions"><Button type="button" onClick={onClose}>{t("common.cancel")}</Button><Button type="submit" variant="primary" icon="check" busy={submitting} disabled={!name.trim() || !systemPrompt.trim()}>{t("agents.new")}</Button></div>
+        <label className="field"><span>{t("agents.instructions")} <em>{t("common.optional")}</em></span><textarea rows={9} value={systemPrompt} onChange={(event) => setSystemPrompt(event.target.value)} /><small>{t("agents.instructionsHint")}</small></label>
+        <div className="modal__actions"><Button type="button" onClick={onClose}>{t("common.cancel")}</Button><Button type="submit" variant="primary" icon="check" busy={submitting} disabled={!name.trim()}>{t("agents.new")}</Button></div>
       </form>
     </Modal>
   );

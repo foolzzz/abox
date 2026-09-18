@@ -54,9 +54,7 @@ button:disabled { cursor: not-allowed; }
 .auth-brand strong { font-size: 1.05rem; }
 .auth-brand small { margin-top: 2px; color: var(--text-faint); }
 .auth-heading h1 { margin: 3px 0 8px; font-size: 2rem; }
-.auth-heading p:last-child, .auth-hint { margin-bottom: 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.55; }
-.auth-hint { padding-top: 4px; border-top: 1px solid var(--border-soft); }
-.auth-hint code { color: var(--teal-strong); }
+.auth-heading p:last-child { margin-bottom: 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.55; }
 .auth-actions { display: flex; justify-content: flex-end; gap: 9px; }
 .skip-link { position: fixed; top: 10px; left: 10px; z-index: 200; padding: 10px 14px; border-radius: 8px; background: var(--teal); color: #07110f; font-weight: 700; transform: translateY(-150%); transition: transform 160ms ease; }
 .skip-link:focus { transform: translateY(0); }

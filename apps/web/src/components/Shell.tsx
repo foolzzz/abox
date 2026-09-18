@@ -15,7 +15,6 @@ const NAV_ITEMS: Array<{ to: string; labelKey: string; icon: IconName; minimumRo
   { to: "/agents", labelKey: "nav.agents", icon: "agent" },
   { to: "/boxes", labelKey: "nav.boxes", icon: "box" },
   { to: "/schedules", labelKey: "nav.schedules", icon: "schedule" },
-  { to: "/approvals", labelKey: "nav.approvals", icon: "approval", minimumRole: "user" },
   { to: "/notifications", labelKey: "nav.notifications", icon: "notification" },
   { to: "/hosts", labelKey: "nav.hosts", icon: "host" },
   { to: "/workspaces", labelKey: "nav.workspaces", icon: "workspace" },
@@ -28,31 +27,21 @@ export function Shell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const meta = useResource((signal) => api.getMeta(signal), []);
   const authenticated = Boolean(meta.data);
-  const canReviewApprovals = roleAtLeast(meta.data?.currentUser.role, "user");
-  const approvals = useResource((signal) => authenticated && canReviewApprovals ? api.listApprovals(signal) : Promise.resolve([]), [authenticated, canReviewApprovals]);
   const notifications = useResource((signal) => authenticated ? api.listNotifications(signal) : Promise.resolve([]), [authenticated]);
 
   useEffect(() => setMobileOpen(false), [location.pathname]);
   useEffect(() => {
     const interval = window.setInterval(() => {
-      if (!authenticated) return;
-      notifications.reload();
-      if (canReviewApprovals) approvals.reload();
+      if (authenticated) notifications.reload();
     }, 30_000);
     return () => window.clearInterval(interval);
-  }, [approvals.reload, authenticated, canReviewApprovals, notifications.reload]);
+  }, [authenticated, notifications.reload]);
   useEffect(() => {
     const refreshNotifications = () => notifications.reload();
-    const refreshApprovals = () => approvals.reload();
     window.addEventListener("agentbox:notifications-changed", refreshNotifications);
-    window.addEventListener("agentbox:approvals-changed", refreshApprovals);
-    return () => {
-      window.removeEventListener("agentbox:notifications-changed", refreshNotifications);
-      window.removeEventListener("agentbox:approvals-changed", refreshApprovals);
-    };
-  }, [approvals.reload, notifications.reload]);
+    return () => window.removeEventListener("agentbox:notifications-changed", refreshNotifications);
+  }, [notifications.reload]);
 
-  const pendingApprovals = approvals.data?.filter((approval) => approval.status === "pending").length ?? 0;
   const unreadNotifications = notifications.data?.filter((notification) => notification.status === "unread").length ?? 0;
   const pageTitle = /^\/boxes\/[^/]+\/(subagents|todos|artifacts|diff)$/.test(location.pathname)
     ? t("shell.boxOutput")
@@ -98,7 +87,6 @@ export function Shell({ children }: { children: ReactNode }) {
                 <Link className={cx("primary-nav__item", active && "primary-nav__item--active")} to={item.to} key={item.to} aria-current={active ? "page" : undefined}>
                   <Icon name={item.icon} />
                   <span>{t(item.labelKey)}</span>
-                  {item.to === "/approvals" && pendingApprovals > 0 ? <span className="nav-badge" aria-label={`${pendingApprovals} pending`}>{pendingApprovals}</span> : null}
                   {item.to === "/notifications" && unreadNotifications > 0 ? <span className="nav-badge nav-badge--notification" aria-label={`${unreadNotifications} unread`}>{unreadNotifications}</span> : null}
                 </Link>
               );

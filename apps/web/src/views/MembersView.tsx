@@ -23,6 +23,8 @@ export function MembersView() {
   }, []);
   const [createOpen, setCreateOpen] = useState(false);
   const [resetMember, setResetMember] = useState<Member>();
+  const [deletingMember, setDeletingMember] = useState<Member>();
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [updatingMemberId, setUpdatingMemberId] = useState<string>();
   const [requestError, setRequestError] = useState<string>();
 
@@ -70,9 +72,9 @@ export function MembersView() {
               return (
                 <div className="data-table__row" role="row" key={member.id}>
                   <span role="cell" data-label="Account" className="member-cell"><span className="member-avatar member-avatar--small">{initials(member.displayName || member.login)}</span><span><strong>{member.displayName || member.login}{isCurrent ? " (you)" : ""}</strong><small>{member.login} · {member.hasPassword ? "password account" : "legacy identity (disabled)"} · joined {formatDate(member.createdAt)}</small></span></span>
-                  <span role="cell" data-label="Role">{isCurrent ? <StatusChip status={member.role} compact /> : <label className="member-role-select"><span className="sr-only">Role for {member.login}</span><select value={member.role} disabled={busy || !member.hasPassword} onChange={(event) => void updateAccount(member, { role: event.target.value as OrganizationRole })}><option value="admin">Administrator</option><option value="user">User</option></select></label>}</span>
+                  <span role="cell" data-label="Role">{isCurrent ? <StatusChip status={member.role} compact /> : <label className="member-role-select"><span className="sr-only">Role for {member.login}</span><select value={member.role} disabled={busy} onChange={(event) => void updateAccount(member, { role: event.target.value as OrganizationRole })}><option value="admin">Administrator</option><option value="user">User</option></select></label>}</span>
                   <span role="cell" data-label="Status">{isCurrent ? <StatusChip status={member.status} compact /> : <label className="member-role-select"><span className="sr-only">Status for {member.login}</span><select value={member.status} disabled={busy || !member.hasPassword} onChange={(event) => void updateAccount(member, { status: event.target.value as "active" | "disabled" })}><option value="active">Active</option><option value="disabled">Disabled</option></select></label>}</span>
-                  <span role="cell" data-label="Actions">{member.hasPassword && !isCurrent ? <Button variant="ghost" onClick={() => setResetMember(member)}>Reset password</Button> : <span className="permission-caption">{busy ? "Updating…" : isCurrent ? "Current session" : "No local password"}</span>}</span>
+                  <span role="cell" data-label="Actions">{!isCurrent ? <div className="table-actions">{member.hasPassword ? <Button variant="ghost" onClick={() => setResetMember(member)}>Reset password</Button> : null}<Button variant="danger" icon="trash" onClick={() => setDeletingMember(member)}>Delete</Button></div> : <span className="permission-caption">{busy ? "Updating…" : "Current session"}</span>}</span>
                 </div>
               );
             })}
@@ -87,6 +89,7 @@ export function MembersView() {
 
       <CreateAccountModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={(member) => { resource.setData((current) => current ? { ...current, members: [...current.members, member] } : current); setCreateOpen(false); notify(`${member.login} was created.`); }} />
       <ResetPasswordModal member={resetMember} onClose={() => setResetMember(undefined)} onReset={(member) => { replaceMember(member); setResetMember(undefined); notify(`${member.login} must change the new temporary password at next sign-in.`); }} />
+      <Modal open={Boolean(deletingMember)} title={`Delete ${deletingMember?.displayName || deletingMember?.login || "account"}?`} description="Disable this account, revoke sessions, and remove it from the organization account list." onClose={() => !deleteBusy && setDeletingMember(undefined)} size="small"><div className="confirm-dialog"><InlineAlert tone="warning">You cannot delete your own account or the last active administrator.</InlineAlert><div className="modal__actions"><Button disabled={deleteBusy} onClick={() => setDeletingMember(undefined)}>Cancel</Button><Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => { if (!deletingMember) return; setDeleteBusy(true); setRequestError(undefined); void api.deleteAccount(deletingMember.id).then(() => { resource.setData((current) => current ? { ...current, members: current.members.filter((member) => member.id !== deletingMember.id) } : current); notify(`${deletingMember.login} was deleted.`); setDeletingMember(undefined); }, (error: unknown) => setRequestError(errorMessage(error))).finally(() => setDeleteBusy(false)); }}>Delete account</Button></div></div></Modal>
     </div>
   );
 }

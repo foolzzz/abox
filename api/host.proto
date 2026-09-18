@@ -153,6 +153,7 @@ message TerminalInput {
   bool close = 8;
   string mode = 9;
   string runtime_type = 10;
+  string model = 11;
   bool terminate = 12;
 }
 

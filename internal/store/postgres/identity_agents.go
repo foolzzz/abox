@@ -181,6 +181,41 @@ func (s *Store) CreateAgent(ctx context.Context, user domain.User, input domain.
 	return result, err
 }
 
+func (s *Store) DeleteAgent(ctx context.Context, user domain.User, agentID string) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
+			return err
+		}
+		var name, status string
+		if err := tx.QueryRow(ctx, `
+            SELECT name, status FROM agents
+            WHERE organization_id = $1 AND id = $2
+            FOR UPDATE`, user.OrganizationID, agentID).Scan(&name, &status); err != nil {
+			return mapError("lock agent for deletion", err)
+		}
+		if status == "archived" {
+			return nil
+		}
+		var boxCount, scheduleCount int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM boxes WHERE agent_id = $1 AND status <> 'terminated'`, agentID).Scan(&boxCount); err != nil {
+			return mapError("count agent boxes", err)
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM schedules WHERE agent_id = $1 AND status <> 'deleted'`, agentID).Scan(&scheduleCount); err != nil {
+			return mapError("count agent schedules", err)
+		}
+		if boxCount > 0 || scheduleCount > 0 {
+			return fmt.Errorf("%w: agent is used by %d active boxes and %d schedules", storepkg.ErrConflict, boxCount, scheduleCount)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE agents SET status = 'archived', archived_at = now(), updated_at = now(), version = version + 1
+            WHERE id = $1`, agentID); err != nil {
+			return mapError("archive agent", err)
+		}
+		return insertAudit(ctx, tx, user.OrganizationID, "user", user.ID, "",
+			"agent.deleted", "agent", agentID, map[string]any{"name": name})
+	})
+}
+
 func (s *Store) GetAgent(ctx context.Context, user domain.User, id string) (domain.Agent, error) {
 	if _, err := requireMembership(ctx, s.pool, user); err != nil {
 		return domain.Agent{}, err

@@ -284,6 +284,15 @@ func (s *Server) handleResetAccountPassword(writer http.ResponseWriter, request 
 	writeJSON(writer, http.StatusOK, member)
 }
 
+func (s *Server) handleDeleteAccount(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	if err := s.store.DeleteAccount(request.Context(), user, chiURLParam(request, "memberID")); err != nil {
+		s.writeStoreError(writer, "delete account", err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) issueSession(writer http.ResponseWriter, request *http.Request, user domain.User) error {
 	token, tokenHash, err := authpkg.NewSessionToken()
 	if err != nil {

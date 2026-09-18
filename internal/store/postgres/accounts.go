@@ -244,9 +244,6 @@ func (s *Store) UpdateAccount(ctx context.Context, user domain.User, memberID st
 		if err != nil {
 			return err
 		}
-		if !current.HasPassword {
-			return fmt.Errorf("%w: legacy identities cannot be reactivated; create a local account", storepkg.ErrInvalidState)
-		}
 		displayName, role, status := current.DisplayName, current.Role, current.Status
 		if input.DisplayName != nil {
 			displayName = strings.TrimSpace(*input.DisplayName)
@@ -265,6 +262,9 @@ func (s *Store) UpdateAccount(ctx context.Context, user domain.User, memberID st
 			if status != "active" && status != "disabled" {
 				return fmt.Errorf("%w: invalid account status %q", storepkg.ErrInvalidState, status)
 			}
+		}
+		if status == "active" && !current.HasPassword {
+			return fmt.Errorf("%w: an account without a local password cannot be activated", storepkg.ErrInvalidState)
 		}
 		if memberID == user.ID && (role != current.Role || status != current.Status) {
 			return fmt.Errorf("%w: administrators cannot change their own role or status", storepkg.ErrForbidden)
@@ -303,6 +303,52 @@ func (s *Store) UpdateAccount(ctx context.Context, user domain.User, memberID st
 		return err
 	})
 	return result, err
+}
+
+func (s *Store) DeleteAccount(ctx context.Context, user domain.User, memberID string) error {
+	if memberID == user.ID {
+		return fmt.Errorf("%w: administrators cannot delete their own account", storepkg.ErrForbidden)
+	}
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
+			return err
+		}
+		current, err := getMember(ctx, tx, user.OrganizationID, memberID)
+		if err != nil {
+			return err
+		}
+		if current.Role == "admin" && current.Status == "active" {
+			var administrators int
+			if err := tx.QueryRow(ctx, `
+                SELECT count(*)
+                FROM organization_members om
+                JOIN users u ON u.id = om.user_id
+                WHERE om.organization_id = $1 AND om.status = 'active'
+                  AND om.role = 'admin' AND u.status = 'active'`, user.OrganizationID).Scan(&administrators); err != nil {
+				return mapError("count active administrators", err)
+			}
+			if administrators <= 1 {
+				return fmt.Errorf("%w: the last active administrator cannot be deleted", storepkg.ErrConflict)
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id = $1`, memberID); err != nil {
+			return mapError("invalidate deleted account sessions", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE users SET status = 'disabled', updated_at = now() WHERE id = $1`, memberID); err != nil {
+			return mapError("disable deleted account", err)
+		}
+		if err := insertAudit(ctx, tx, user.OrganizationID, "user", user.ID, "",
+			"account.deleted", "user", memberID,
+			map[string]any{"login": current.Login, "role": current.Role}); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE organization_members SET status = 'suspended'
+            WHERE organization_id = $1 AND user_id = $2`, user.OrganizationID, memberID); err != nil {
+			return mapError("suspend deleted account membership", err)
+		}
+		return nil
+	})
 }
 
 func (s *Store) ResetAccountPassword(ctx context.Context, user domain.User, memberID, passwordHash string) (domain.Member, error) {

@@ -390,7 +390,7 @@ components:
         systemPrompt: {type: string}
     CreateAgentRequest:
       type: object
-      required: [name, runtimeType, systemPrompt]
+      required: [name, runtimeType]
       properties:
         name: {type: string}
         runtimeType: {enum: [omp, claude, acp]}
