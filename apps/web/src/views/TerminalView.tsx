@@ -5,12 +5,15 @@ import { SearchAddon } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { api } from "../api/client";
+import { api, errorMessage } from "../api/client";
+import type { RuntimeType } from "../api/types";
 import { Icon } from "../components/Icon";
-import { Button, StatusChip } from "../components/ui";
+import { useToast } from "../components/Toast";
+import { Button, InlineAlert, Modal, StatusChip } from "../components/ui";
 import { useResource } from "../hooks/useResource";
+import { roleAtLeast, useAccess } from "../lib/access";
 import { useI18n } from "../lib/i18n";
-import { Link } from "../lib/router";
+import { Link, navigate } from "../lib/router";
 
 interface TerminalServerMessage {
   type: "data" | "error";
@@ -23,6 +26,8 @@ interface TerminalServerMessage {
 
 export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "command" }) {
   const { t } = useI18n();
+  const { currentUser, meta } = useAccess();
+  const { notify } = useToast();
   const isAgentTerminal = mode === "agent";
   const container = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLElement>(null);
@@ -33,6 +38,14 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
   const [error, setError] = useState<string>();
   const [search, setSearch] = useState("");
   const [connectionGeneration, setConnectionGeneration] = useState(0);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
+  const [modelOpen, setModelOpen] = useState(false);
+  const [modelValue, setModelValue] = useState("");
+  const [modelBusy, setModelBusy] = useState(false);
+  const [settingsError, setSettingsError] = useState<string>();
+  const [visibilityBusy, setVisibilityBusy] = useState(false);
   const context = useResource(async (signal) => {
     const [box, hosts, workspaces] = await Promise.all([api.getBox(boxId, signal), api.listHosts(signal), api.listWorkspaces(signal)]);
     return {
@@ -165,6 +178,52 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
     else await surface.current?.requestFullscreen();
   };
 
+  const canManageBox = roleAtLeast(currentUser?.role, "admin") || context.data?.box.ownerUserId === currentUser?.id;
+  const canDelete = canManageBox;
+  const deleteBox = async () => {
+    setDeleteBusy(true);
+    setDeleteError(undefined);
+    try {
+      await api.deleteBox(boxId);
+      notify(t("box.deleted"));
+      navigate("/boxes", { replace: true });
+    } catch (requestError) {
+      setDeleteError(errorMessage(requestError));
+      setDeleteBusy(false);
+    }
+  };
+  const switchModel = async () => {
+    setModelBusy(true);
+    setSettingsError(undefined);
+    try {
+      const box = await api.updateBoxModel(boxId, modelValue.trim());
+      context.setData((current) => current ? { ...current, box } : current);
+      setModelOpen(false);
+      setConnectionGeneration((value) => value + 1);
+      notify(`Model switched to ${box.model || "runtime default"}.`);
+    } catch (requestError) {
+      setSettingsError(errorMessage(requestError));
+    } finally {
+      setModelBusy(false);
+    }
+  };
+  const toggleVisibility = async () => {
+    const current = context.data?.box.visibility ?? "private";
+    setVisibilityBusy(true);
+    setSettingsError(undefined);
+    try {
+      const box = await api.updateBoxVisibility(boxId, current === "private" ? "org" : "private");
+      context.setData((value) => value ? { ...value, box } : value);
+      notify(box.visibility === "org" ? "Box is visible to all organization users." : "Box is private to its owner.");
+    } catch (requestError) {
+      setSettingsError(errorMessage(requestError));
+    } finally {
+      setVisibilityBusy(false);
+    }
+  };
+  const runtimeType = context.data?.box.runtimeType as RuntimeType | undefined;
+  const modelSuggestions = runtimeType ? meta?.runtimeModels[runtimeType] ?? [] : [];
+
   return (
     <div className="page terminal-page">
       <header className="page-heading terminal-heading">
@@ -175,7 +234,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
           <p>{t(isAgentTerminal ? "terminal.agentDescription" : "terminal.commandDescription")}</p>
           <dl className="terminal-context"><div><dt>{t("box.host")}</dt><dd>{context.data?.host ? `${context.data.host.name} · ${context.data.host.systemHostname || "hostname unavailable"}` : "—"}</dd></div><div><dt>{t("box.workspace")}</dt><dd className="mono" title={context.data?.workspace?.path}>{context.data?.workspace?.path ?? "—"}</dd></div>{isAgentTerminal ? <div><dt>Session</dt><dd className="mono">abox-agent-{boxId.slice(0, 8)}</dd></div> : null}</dl>
         </div>
-        <div className="terminal-heading__actions"><StatusChip status={status} /><Button icon="refresh" onClick={() => setConnectionGeneration((value) => value + 1)}>{t("terminal.reconnect")}</Button><Button icon="expand" onClick={() => void toggleFullscreen()}>{t("terminal.fullscreen")}</Button></div>
+        <div className="terminal-heading__actions"><StatusChip status={status} />{isAgentTerminal && canManageBox ? <Button icon="edit" onClick={() => { setModelValue(context.data?.box.model ?? ""); setModelOpen(true); }}>Model: {context.data?.box.model || "default"}</Button> : null}{canManageBox ? <Button icon="share" busy={visibilityBusy} onClick={() => void toggleVisibility()}>{context.data?.box.visibility === "org" ? "Organization visible" : "Private"}</Button> : null}<Button icon="refresh" onClick={() => setConnectionGeneration((value) => value + 1)}>{t("terminal.reconnect")}</Button><Button icon="expand" onClick={() => void toggleFullscreen()}>{t("terminal.fullscreen")}</Button>{canDelete ? <Button variant="danger" icon="trash" onClick={() => setDeleteOpen(true)}>{t("box.delete")}</Button> : null}</div>
       </header>
       <nav className="box-panel-nav" aria-label={t("shell.boxOutput")}>
         <Link className={isAgentTerminal ? "box-panel-nav__item box-panel-nav__item--active" : "box-panel-nav__item"} to={`/boxes/${boxId}/agent-terminal`}><Icon name="terminal" /><span>{t("box.agentTerminal")}</span></Link>
@@ -186,11 +245,19 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
         <Link className="box-panel-nav__item" to={`/boxes/${boxId}/diff`}><Icon name="diff" /><span>{t("box.diff")}</span></Link>
       </nav>
       {error ? <div className="stream-warning" role="alert">{error}</div> : null}
+      {deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}
+      {settingsError ? <InlineAlert>{settingsError}</InlineAlert> : null}
       <section className="terminal-surface" aria-label={t(isAgentTerminal ? "terminal.agentAria" : "terminal.commandAria")} ref={surface}>
         <div className="terminal-toolbar"><label><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleSearchKey} placeholder={t("terminal.search")} /></label><button type="button" onClick={searchTerminal}>{t("terminal.findNext")}</button></div>
         <div className="terminal-container" ref={container} />
         <div className="terminal-mobile-keys" aria-label={t("terminal.mobileKeys")}><button type="button" onClick={() => sendKey("\x02")}>Ctrl-B</button><button type="button" onClick={() => sendKey("\x03")}>Ctrl-C</button><button type="button" onClick={() => sendKey("\x1b")}>Esc</button><button type="button" onClick={() => sendKey("\t")}>Tab</button><button type="button" onClick={() => sendKey("\x1b[A")}>↑</button><button type="button" onClick={() => sendKey("\x1b[B")}>↓</button><button type="button" onClick={() => sendKey("\x1b[D")}>←</button><button type="button" onClick={() => sendKey("\x1b[C")}>→</button></div>
       </section>
+      <Modal open={deleteOpen} title={t("box.deleteTitle", { name: context.data?.box.name ?? "Agent Box" })} description={t("box.deleteDescription")} onClose={() => !deleteBusy && setDeleteOpen(false)} size="small">
+        <div className="confirm-dialog"><InlineAlert tone="warning">{t("box.deleteWarning")}</InlineAlert><div className="modal__actions"><Button disabled={deleteBusy} onClick={() => setDeleteOpen(false)}>{t("common.cancel")}</Button><Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => void deleteBox()}>{t("box.deleteConfirm")}</Button></div></div>
+      </Modal>
+      <Modal open={modelOpen} title="Switch model" description="Changing the model restarts the persistent Agent Terminal and applies to future structured runs for this Box." onClose={() => !modelBusy && setModelOpen(false)} size="small">
+        <div className="modal-form"><label className="field"><span>Model</span><input autoFocus list={`box-model-suggestions-${runtimeType ?? "runtime"}`} value={modelValue} onChange={(event) => setModelValue(event.target.value)} placeholder="Leave empty for Agent default" /><datalist id={`box-model-suggestions-${runtimeType ?? "runtime"}`}>{modelSuggestions.map((model) => <option value={model} key={model} />)}</datalist><small>Enter any model ID supported by {runtimeType?.toUpperCase() ?? "the runtime"}.</small></label><InlineAlert tone="warning">The current tmux Agent Terminal and active structured Runtime will be stopped before reconnecting.</InlineAlert><div className="modal__actions"><Button disabled={modelBusy} onClick={() => setModelOpen(false)}>{t("common.cancel")}</Button><Button variant="primary" busy={modelBusy} onClick={() => void switchModel()}>Switch model</Button></div></div>
+      </Modal>
     </div>
   );
 }

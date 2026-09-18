@@ -5,7 +5,7 @@ import { Button, InlineAlert } from "../components/ui";
 import { Icon } from "../components/Icon";
 
 export function LoginView({ onAuthenticated }: { onAuthenticated: (user: CurrentUser) => void }) {
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
@@ -32,7 +32,6 @@ export function LoginView({ onAuthenticated }: { onAuthenticated: (user: Current
         <label className="field"><span>Username</span><input autoComplete="username" autoFocus value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
         <label className="field"><span>Password</span><input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
         <Button type="submit" variant="primary" busy={submitting}>Sign in</Button>
-        <p className="auth-hint">First-run administrator: <code>admin</code> / <code>admin123</code>. The password must be changed after the first sign-in.</p>
       </form>
     </div>
   );

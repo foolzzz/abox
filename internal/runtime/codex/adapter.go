@@ -168,7 +168,7 @@ func (a *Adapter) Start(ctx context.Context, spec runtimeapi.StartSpec) (runtime
 	params := map[string]any{
 		"cwd":            workspace,
 		"approvalPolicy": "never",
-		"sandbox":        "workspace-write",
+		"sandbox":        "danger-full-access",
 	}
 	if spec.Model != "" {
 		params["model"] = spec.Model
@@ -211,7 +211,7 @@ func (a *Adapter) startProcess(spec runtimeapi.StartSpec) (*processHandle, error
 	if err := validateEnvironmentOverrides(spec.Environment); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(a.config.Binary, "app-server", "--listen", "stdio://")
+	cmd := exec.Command(a.config.Binary, "--dangerously-bypass-approvals-and-sandbox", "app-server", "--listen", "stdio://")
 	if spec.Workspace != "" {
 		cmd.Dir = spec.Workspace
 	}

@@ -130,8 +130,21 @@ func (s *Store) CreateAgent(ctx context.Context, user domain.User, input domain.
 	if input.RuntimeType == "" {
 		input.RuntimeType = "omp"
 	}
+	approvalMode := ""
+	switch input.RuntimeType {
+	case "omp":
+		approvalMode = "yolo"
+	case "codex":
+		approvalMode = "never"
+	case "claude":
+		approvalMode = "bypass"
+	}
+	approvalPolicy, err := json.Marshal(map[string]string{"mode": approvalMode})
+	if err != nil {
+		return domain.Agent{}, fmt.Errorf("encode approval policy: %w", err)
+	}
 	var result domain.Agent
-	err := s.withTx(ctx, func(tx pgx.Tx) error {
+	err = s.withTx(ctx, func(tx pgx.Tx) error {
 		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
 			return err
 		}
@@ -156,10 +169,11 @@ func (s *Store) CreateAgent(ctx context.Context, user domain.User, input domain.
 		_, err = tx.Exec(ctx, `
             INSERT INTO agent_versions(
                 id, organization_id, agent_id, version_no, lifecycle_status,
-                runtime_type, model, prompt_mode, system_prompt, created_by_user_id, published_at
-            ) VALUES ($1,$2,$3,1,'published',$4,$5,'append',$6,$7,now())`,
+                runtime_type, model, prompt_mode, system_prompt, approval_policy,
+                created_by_user_id, published_at
+            ) VALUES ($1,$2,$3,1,'published',$4,$5,'append',$6,$7,$8,now())`,
 			versionID, user.OrganizationID, agentID, input.RuntimeType,
-			nullableText(input.Model), input.SystemPrompt, user.ID,
+			nullableText(input.Model), input.SystemPrompt, approvalPolicy, user.ID,
 		)
 		if err != nil {
 			return mapError("insert published agent version", err)
@@ -179,6 +193,42 @@ func (s *Store) CreateAgent(ctx context.Context, user domain.User, input domain.
 		return err
 	})
 	return result, err
+}
+
+func (s *Store) DeleteAgent(ctx context.Context, user domain.User, agentID string) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
+			return err
+		}
+		var name, status string
+		if err := tx.QueryRow(ctx, `
+            SELECT name, status FROM agents
+            WHERE organization_id = $1 AND id = $2
+            FOR UPDATE`, user.OrganizationID, agentID).Scan(&name, &status); err != nil {
+			return mapError("lock agent for deletion", err)
+		}
+		if status == "archived" {
+			return nil
+		}
+		var hasActiveBoxes, hasSchedules bool
+		if err := tx.QueryRow(ctx, `
+            SELECT
+                EXISTS(SELECT 1 FROM boxes WHERE organization_id = $1 AND agent_id = $2 AND status <> 'terminated'),
+                EXISTS(SELECT 1 FROM schedules WHERE organization_id = $1 AND agent_id = $2 AND status <> 'deleted')`,
+			user.OrganizationID, agentID).Scan(&hasActiveBoxes, &hasSchedules); err != nil {
+			return mapError("check agent dependencies", err)
+		}
+		if hasActiveBoxes || hasSchedules {
+			return fmt.Errorf("%w: agent is referenced by active boxes or non-deleted schedules", storepkg.ErrConflict)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE agents SET status = 'archived', archived_at = now(), updated_at = now(), version = version + 1
+            WHERE id = $1`, agentID); err != nil {
+			return mapError("archive agent", err)
+		}
+		return insertAudit(ctx, tx, user.OrganizationID, "user", user.ID, "",
+			"agent.deleted", "agent", agentID, map[string]any{"name": name})
+	})
 }
 
 func (s *Store) GetAgent(ctx context.Context, user domain.User, id string) (domain.Agent, error) {

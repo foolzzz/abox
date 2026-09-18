@@ -57,6 +57,54 @@ func (s *Store) ListHosts(ctx context.Context, user domain.User) ([]domain.Host,
 	return result, nil
 }
 
+func (s *Store) DeleteHost(ctx context.Context, user domain.User, hostID string) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
+			return err
+		}
+		var organizationID, name string
+		var status domain.HostStatus
+		if err := tx.QueryRow(ctx, `
+            SELECT organization_id, name, status FROM hosts
+            WHERE organization_id = $1 AND id = $2
+            FOR UPDATE`, user.OrganizationID, hostID).Scan(&organizationID, &name, &status); err != nil {
+			return mapError("lock host for deletion", err)
+		}
+		if status == domain.HostRevoked {
+			return nil
+		}
+		if status != domain.HostOffline {
+			return fmt.Errorf("%w: host must be offline before deletion", storepkg.ErrConflict)
+		}
+		var hasActiveBoxes, hasWorkspaces bool
+		if err := tx.QueryRow(ctx, `
+            SELECT
+                EXISTS(SELECT 1 FROM boxes WHERE organization_id = $1 AND host_id = $2 AND status <> 'terminated'),
+                EXISTS(SELECT 1 FROM workspaces WHERE organization_id = $1 AND host_id = $2 AND status <> 'archived')`,
+			user.OrganizationID, hostID).Scan(&hasActiveBoxes, &hasWorkspaces); err != nil {
+			return mapError("check host dependencies", err)
+		}
+		if hasActiveBoxes || hasWorkspaces {
+			return fmt.Errorf("%w: host is referenced by active boxes or non-archived workspaces", storepkg.ErrConflict)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE hosts
+            SET status = 'revoked', current_daemon_instance_id = NULL,
+                revoked_at = now(), updated_at = now(), version = version + 1
+            WHERE id = $1`, hostID); err != nil {
+			return mapError("revoke deleted host", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE host_credentials SET status = 'revoked', revoked_at = now() WHERE host_id = $1 AND status <> 'revoked'`, hostID); err != nil {
+			return mapError("revoke host credentials", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE host_runtime_capabilities SET status = 'unavailable', last_checked_at = now() WHERE host_id = $1`, hostID); err != nil {
+			return mapError("disable host runtimes", err)
+		}
+		return insertAudit(ctx, tx, organizationID, "user", user.ID, "",
+			"host.deleted", "host", hostID, map[string]any{"name": name})
+	})
+}
+
 func (s *Store) UpsertHost(ctx context.Context, host domain.Host, daemonInstanceID string, lastAck uint64) (domain.Host, error) {
 	if host.ID == "" || host.OrganizationID == "" || daemonInstanceID == "" {
 		return domain.Host{}, fmt.Errorf("%w: host id, organization id, and daemon instance id are required", storepkg.ErrInvalidState)
@@ -422,6 +470,56 @@ func (s *Store) CreateWorkspace(ctx context.Context, user domain.User, input dom
 		return err
 	})
 	return result, command, err
+}
+
+func (s *Store) DeleteWorkspace(ctx context.Context, user domain.User, workspaceID string) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
+			return err
+		}
+		var organizationID, rootID, name, status string
+		if err := tx.QueryRow(ctx, `
+            SELECT organization_id, workspace_root_id, name, status
+            FROM workspaces
+            WHERE organization_id = $1 AND id = $2
+            FOR UPDATE`, user.OrganizationID, workspaceID).Scan(
+			&organizationID, &rootID, &name, &status,
+		); err != nil {
+			return mapError("lock workspace for deletion", err)
+		}
+		if status == "archived" {
+			return nil
+		}
+		var hasActiveBoxes bool
+		if err := tx.QueryRow(ctx, `
+            SELECT EXISTS(
+                SELECT 1 FROM boxes
+                WHERE organization_id = $1 AND workspace_id = $2 AND status <> 'terminated'
+            )`, user.OrganizationID, workspaceID).Scan(&hasActiveBoxes); err != nil {
+			return mapError("check workspace dependencies", err)
+		}
+		if hasActiveBoxes {
+			return fmt.Errorf("%w: workspace is referenced by active boxes", storepkg.ErrConflict)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE workspaces
+            SET status = 'archived', archived_at = now(), updated_at = now(), version = version + 1
+            WHERE id = $1`, workspaceID); err != nil {
+			return mapError("archive workspace", err)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE host_workspace_roots root
+            SET enabled = false, updated_at = now()
+            WHERE root.id = $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM workspaces workspace
+                  WHERE workspace.workspace_root_id = root.id AND workspace.status <> 'archived'
+              )`, rootID); err != nil {
+			return mapError("disable unused workspace root", err)
+		}
+		return insertAudit(ctx, tx, organizationID, "user", user.ID, "",
+			"workspace.deleted", "workspace", workspaceID, map[string]any{"name": name})
+	})
 }
 
 func workspacePathAdvertised(labels []byte, candidate string) bool {

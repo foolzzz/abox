@@ -174,24 +174,29 @@ func (m *TerminalManager) terminalCommand(ctx context.Context, input *hostv1.Ter
 		return nil, "", errors.New("agent terminal requires boxId and runtimeType")
 	}
 	tmuxSession := tmuxSessionName(input.GetBoxId())
-	if err := m.ensureAgentSession(ctx, tmuxSession, workspace, input.GetRuntimeType()); err != nil {
+	if err := m.ensureAgentSession(ctx, tmuxSession, workspace, input.GetRuntimeType(), input.GetModel()); err != nil {
 		return nil, "", err
 	}
 	return exec.CommandContext(ctx, m.tmuxBinary, "attach-session", "-t", "="+tmuxSession), tmuxSession, nil
 }
 
-func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, workspace, runtimeType string) error {
+func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, workspace, runtimeType, model string) error {
 	if m.tmuxSessionExists(ctx, sessionName) {
 		return nil
 	}
 	var runtimeCommand []string
 	switch runtimeType {
 	case "omp":
-		runtimeCommand = []string{"omp"}
+		runtimeCommand = []string{"omp", "--approval-mode", "yolo"}
 	case "codex":
-		runtimeCommand = []string{"codex"}
+		runtimeCommand = []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}
+	case "claude":
+		runtimeCommand = []string{"claude", "--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions"}
 	default:
 		return fmt.Errorf("runtime %q does not support native Agent Terminal", runtimeType)
+	}
+	if model = strings.TrimSpace(model); model != "" {
+		runtimeCommand = append(runtimeCommand, "--model", model)
 	}
 	args := []string{"new-session", "-d", "-s", sessionName, "-c", workspace, "--"}
 	args = append(args, runtimeCommand...)

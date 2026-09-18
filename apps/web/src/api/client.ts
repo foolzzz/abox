@@ -2,8 +2,6 @@ import { isObjectRecord } from "../lib/data";
 import type {
   AccessControlEntry,
   Agent,
-  Approval,
-  ApprovalDecisionRequest,
   Artifact,
   Box,
   BoxSnapshot,
@@ -130,16 +128,24 @@ export const api = {
     request<Member>(`/members/${encode(memberId)}`, { method: "PATCH", body, signal }),
   resetAccountPassword: (memberId: string, body: ResetPasswordRequest, signal?: AbortSignal) =>
     request<Member>(`/members/${encode(memberId)}/password`, { method: "PUT", body, signal }),
+  deleteAccount: (memberId: string, signal?: AbortSignal) =>
+    request<void>(`/members/${encode(memberId)}`, { method: "DELETE", signal }),
   listTeams: (signal?: AbortSignal) => request<Team[]>("/teams", { signal }),
   listAgents: (signal?: AbortSignal) => request<Agent[]>("/agents", { signal }),
   createAgent: (body: CreateAgentRequest, signal?: AbortSignal) =>
     request<Agent>("/agents", { method: "POST", body, signal }),
+  deleteAgent: (agentId: string, signal?: AbortSignal) =>
+    request<void>(`/agents/${encode(agentId)}`, { method: "DELETE", signal }),
   listHosts: (signal?: AbortSignal) => request<Host[]>("/hosts", { signal }),
+  deleteHost: (hostId: string, signal?: AbortSignal) =>
+    request<void>(`/hosts/${encode(hostId)}`, { method: "DELETE", signal }),
   listWorkspaces: (signal?: AbortSignal) => request<Workspace[]>("/workspaces", { signal }),
   getWorkspace: (workspaceId: string, signal?: AbortSignal) =>
     request<Workspace>(`/workspaces/${encode(workspaceId)}`, { signal }),
   createWorkspace: (body: CreateWorkspaceRequest, signal?: AbortSignal) =>
     request<Workspace>("/workspaces", { method: "POST", body, signal }),
+  deleteWorkspace: (workspaceId: string, signal?: AbortSignal) =>
+    request<void>(`/workspaces/${encode(workspaceId)}`, { method: "DELETE", signal }),
   getWorkspaceAcl: (workspaceId: string, signal?: AbortSignal) =>
     request<AccessControlEntry[]>(`/workspaces/${encode(workspaceId)}/acl`, { signal }),
   replaceWorkspaceAcl: (workspaceId: string, body: ReplaceAccessControlRequest, signal?: AbortSignal) =>
@@ -147,15 +153,18 @@ export const api = {
   listBoxes: (signal?: AbortSignal) => request<Box[]>("/boxes", { signal }),
   createBox: (body: CreateBoxRequest, signal?: AbortSignal) =>
     request<Box>("/boxes", { method: "POST", body, signal }),
+  deleteBox: (boxId: string, signal?: AbortSignal) =>
+    request<void>(`/boxes/${encode(boxId)}`, { method: "DELETE", signal }),
   getBox: (boxId: string, signal?: AbortSignal) =>
     request<BoxSnapshot>(`/boxes/${encode(boxId)}`, { signal }),
+  updateBoxModel: (boxId: string, model: string, signal?: AbortSignal) =>
+    request<BoxSnapshot>(`/boxes/${encode(boxId)}/model`, { method: "PATCH", body: { model }, signal }),
+  updateBoxVisibility: (boxId: string, visibility: "private" | "org", signal?: AbortSignal) =>
+    request<BoxSnapshot>(`/boxes/${encode(boxId)}/visibility`, { method: "PATCH", body: { visibility }, signal }),
   getBoxAcl: (boxId: string, signal?: AbortSignal) =>
     request<AccessControlEntry[]>(`/boxes/${encode(boxId)}/acl`, { signal }),
   replaceBoxAcl: (boxId: string, body: ReplaceAccessControlRequest, signal?: AbortSignal) =>
     request<AccessControlEntry[]>(`/boxes/${encode(boxId)}/acl`, { method: "PUT", body, signal }),
-  listApprovals: (signal?: AbortSignal) => request<Approval[]>("/approvals", { signal }),
-  decideApproval: (approvalId: string, body: ApprovalDecisionRequest, signal?: AbortSignal) =>
-    request<Approval>(`/approvals/${encode(approvalId)}/decision`, { method: "POST", body, signal }),
   listSchedules: (signal?: AbortSignal) => request<Schedule[]>("/schedules", { signal }),
   createSchedule: (body: CreateScheduleRequest, signal?: AbortSignal) =>
     request<Schedule>("/schedules", { method: "POST", body, signal }),

@@ -187,8 +187,8 @@ func (s *Server) handleCreateAgent(writer http.ResponseWriter, request *http.Req
 		writeProblem(writer, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	if strings.TrimSpace(body.Name) == "" || strings.TrimSpace(body.SystemPrompt) == "" {
-		writeProblem(writer, http.StatusBadRequest, "invalid_request", "name and systemPrompt are required")
+	if strings.TrimSpace(body.Name) == "" {
+		writeProblem(writer, http.StatusBadRequest, "invalid_request", "name is required")
 		return
 	}
 	body.RuntimeType = strings.TrimSpace(body.RuntimeType)
@@ -205,13 +205,22 @@ func (s *Server) handleCreateAgent(writer http.ResponseWriter, request *http.Req
 		Name:         body.Name,
 		RuntimeType:  body.RuntimeType,
 		Model:        body.Model,
-		SystemPrompt: body.SystemPrompt,
+		SystemPrompt: strings.TrimSpace(body.SystemPrompt),
 	})
 	if err != nil {
 		s.writeStoreError(writer, "create agent", err)
 		return
 	}
 	writeJSON(writer, http.StatusCreated, agent)
+}
+
+func (s *Server) handleDeleteAgent(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	if err := s.store.DeleteAgent(request.Context(), user, chi.URLParam(request, "agentID")); err != nil {
+		s.writeStoreError(writer, "delete agent", err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleListHosts(writer http.ResponseWriter, request *http.Request) {
@@ -232,6 +241,15 @@ func (s *Server) handleGetHost(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	writeJSON(writer, http.StatusOK, host)
+}
+
+func (s *Server) handleDeleteHost(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	if err := s.store.DeleteHost(request.Context(), user, chi.URLParam(request, "hostID")); err != nil {
+		s.writeStoreError(writer, "delete host", err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleListWorkspaces(writer http.ResponseWriter, request *http.Request) {
@@ -291,6 +309,15 @@ func (s *Server) handleCreateWorkspace(writer http.ResponseWriter, request *http
 	writeJSON(writer, http.StatusOK, workspace)
 }
 
+func (s *Server) handleDeleteWorkspace(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	if err := s.store.DeleteWorkspace(request.Context(), user, chi.URLParam(request, "workspaceID")); err != nil {
+		s.writeStoreError(writer, "delete workspace", err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleListBoxes(writer http.ResponseWriter, request *http.Request) {
 	user, _ := requestUser(request)
 	boxes, err := s.store.ListBoxes(request.Context(), user)
@@ -315,6 +342,7 @@ func (s *Server) handleCreateBox(writer http.ResponseWriter, request *http.Reque
 	var body struct {
 		Name        string `json:"name"`
 		AgentID     string `json:"agentId"`
+		Model       string `json:"model"`
 		HostID      string `json:"hostId"`
 		WorkspaceID string `json:"workspaceId"`
 	}
@@ -339,6 +367,7 @@ func (s *Server) handleCreateBox(writer http.ResponseWriter, request *http.Reque
 	box, err := s.store.CreateBox(request.Context(), user, domain.CreateBoxInput{
 		Name:        body.Name,
 		AgentID:     body.AgentID,
+		Model:       body.Model,
 		HostID:      body.HostID,
 		WorkspaceID: body.WorkspaceID,
 	})
@@ -347,6 +376,46 @@ func (s *Server) handleCreateBox(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	writeJSON(writer, http.StatusCreated, box)
+}
+
+func (s *Server) handleUpdateBoxModel(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	boxID := chi.URLParam(request, "boxID")
+	var body struct {
+		Model string `json:"model"`
+	}
+	if err := decodeJSON(request, &body); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	box, command, err := s.store.UpdateBoxModel(request.Context(), user, boxID, body.Model)
+	if err != nil {
+		s.writeStoreError(writer, "update box model", err)
+		return
+	}
+	s.terminateAgentTerminal(box)
+	if command != nil {
+		s.dispatch(command)
+	}
+	writeJSON(writer, http.StatusOK, box)
+}
+
+func (s *Server) handleUpdateBoxVisibility(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	boxID := chi.URLParam(request, "boxID")
+	var body struct {
+		Visibility string `json:"visibility"`
+	}
+	if err := decodeJSON(request, &body); err != nil {
+		writeProblem(writer, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	box, err := s.store.UpdateBoxVisibility(request.Context(), user, boxID, body.Visibility)
+	if err != nil {
+		s.writeStoreError(writer, "update box visibility", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, box)
 }
 
 func (s *Server) handleDeleteBox(writer http.ResponseWriter, request *http.Request) {
@@ -541,13 +610,20 @@ func (s *Server) handleResume(writer http.ResponseWriter, request *http.Request)
 		_ = json.Unmarshal(agent.ApprovalPolicy, &approvalPolicy)
 		approvalMode = strings.TrimSpace(approvalPolicy.Mode)
 	}
-	if approvalMode == "" && box.RuntimeType == "omp" {
-		approvalMode = "always-ask"
+	if approvalMode == "" {
+		switch box.RuntimeType {
+		case "omp":
+			approvalMode = "yolo"
+		case "codex":
+			approvalMode = "never"
+		case "claude":
+			approvalMode = "bypass"
+		}
 	}
 	payload, err := json.Marshal(map[string]any{
 		"runtime":      box.RuntimeType,
 		"workspace":    workspace.Path,
-		"model":        agent.Model,
+		"model":        box.Model,
 		"approvalMode": approvalMode,
 	})
 	if err != nil {

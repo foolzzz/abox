@@ -127,6 +127,8 @@ type Box struct {
 	WorkspaceID    string    `json:"workspaceId"`
 	OwnerUserID    string    `json:"ownerUserId"`
 	RuntimeType    string    `json:"runtimeType"`
+	Model          string    `json:"model,omitempty"`
+	Visibility     string    `json:"visibility"`
 	Status         BoxStatus `json:"status"`
 	Version        int64     `json:"version"`
 	LastEventSeq   int64     `json:"lastEventSeq"`
@@ -242,6 +244,7 @@ type CreateWorkspaceInput struct {
 type CreateBoxInput struct {
 	Name        string
 	AgentID     string
+	Model       string
 	HostID      string
 	WorkspaceID string
 }

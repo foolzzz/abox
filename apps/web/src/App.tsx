@@ -3,7 +3,6 @@ import { ToastProvider } from "./components/Toast";
 import { Link, useLocation } from "./lib/router";
 import { useI18n } from "./lib/i18n";
 import { AgentsView } from "./views/AgentsView";
-import { ApprovalsView } from "./views/ApprovalsView";
 import { BoxAutomationView, type BoxAutomationPanel } from "./views/BoxAutomationView";
 import { BoxesView } from "./views/BoxesView";
 import { DashboardView } from "./views/DashboardView";
@@ -24,7 +23,6 @@ export function App() {
   else if (pathname === "/members") content = <MembersView />;
   else if (pathname === "/workspaces") content = <WorkspacesView />;
   else if (pathname === "/boxes") content = <BoxesView />;
-  else if (pathname === "/approvals") content = <ApprovalsView />;
   else if (pathname === "/schedules") content = <SchedulesView />;
   else if (pathname === "/notifications") content = <NotificationsView />;
   else if (/^\/boxes\/[^/]+\/(agent-terminal|command-terminal|terminal)$/.test(pathname)) {

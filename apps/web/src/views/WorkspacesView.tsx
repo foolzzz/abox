@@ -18,6 +18,9 @@ export function WorkspacesView() {
     return { workspaces, hosts };
   }, []);
   const [sharingWorkspace, setSharingWorkspace] = useState<Workspace>();
+  const [deletingWorkspace, setDeletingWorkspace] = useState<Workspace>();
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
   const canCreate = roleAtLeast(currentUser?.role, "admin");
   const createOpen = canCreate && new URLSearchParams(location.search).get("create") === "1";
 
@@ -27,6 +30,36 @@ export function WorkspacesView() {
   const data = resources.data!;
   const hostNames = new Map(data.hosts.map((host) => [host.id, host.name]));
 
+  const openDelete = (workspace: Workspace) => {
+    setDeleteError(undefined);
+    setDeletingWorkspace(workspace);
+  };
+
+  const closeDelete = () => {
+    if (deleteBusy) return;
+    setDeleteError(undefined);
+    setDeletingWorkspace(undefined);
+  };
+
+  const deleteWorkspace = async () => {
+    const workspace = deletingWorkspace;
+    if (!workspace) return;
+    setDeleteBusy(true);
+    setDeleteError(undefined);
+    try {
+      await api.deleteWorkspace(workspace.id);
+      resources.setData((current) => current ? {
+        ...current,
+        workspaces: current.workspaces.filter((candidate) => candidate.id !== workspace.id)
+      } : current);
+      setDeletingWorkspace(undefined);
+    } catch (error) {
+      setDeleteError(errorMessage(error));
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   return (
     <div className="page">
       <PageHeader eyebrow="Execution context" title="Workspaces" description="Host directories made available to agent boxes, with explicit owner, operator, and viewer access." actions={<><RefreshButton refreshing={resources.refreshing} onClick={resources.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/workspaces?create=1")}>New workspace</Button> : null}</>} />
@@ -35,7 +68,7 @@ export function WorkspacesView() {
       {data.workspaces.length ? (
         <section className="table-panel" aria-label="Registered workspaces">
           <div className="data-table data-table--workspaces" role="table">
-            <div className="data-table__header" role="row"><span role="columnheader">Workspace</span><span role="columnheader">Host</span><span role="columnheader">Path</span><span role="columnheader">State</span><span role="columnheader">Created</span><span role="columnheader">Sharing</span></div>
+            <div className="data-table__header" role="row"><span role="columnheader">Workspace</span><span role="columnheader">Host</span><span role="columnheader">Path</span><span role="columnheader">State</span><span role="columnheader">Created</span><span role="columnheader">Actions</span></div>
             {data.workspaces.map((workspace) => (
               <div className="data-table__row" role="row" key={workspace.id}>
                 <span role="cell" data-label="Workspace"><span className="table-primary"><span className="resource-icon resource-icon--workspace"><Icon name="workspace" /></span><strong>{workspace.name}</strong></span></span>
@@ -43,7 +76,7 @@ export function WorkspacesView() {
                 <span role="cell" data-label="Path" className="mono table-path">{workspace.path}</span>
                 <span role="cell" data-label="State"><StatusChip status={workspace.status} compact /></span>
                 <span role="cell" data-label="Created">{formatDate(workspace.createdAt)}</span>
-                <span role="cell" data-label="Sharing"><button className="icon-button" type="button" title={`Sharing for ${workspace.name}`} aria-label={`Open sharing for ${workspace.name}`} onClick={() => setSharingWorkspace(workspace)}><Icon name="share" /></button></span>
+                <span role="cell" data-label="Actions"><div className="table-actions"><button className="icon-button" type="button" title={`Sharing for ${workspace.name}`} aria-label={`Open sharing for ${workspace.name}`} onClick={() => setSharingWorkspace(workspace)}><Icon name="share" /></button>{canCreate ? <button className="icon-button icon-button--danger" type="button" title={`Delete ${workspace.name}`} aria-label={`Delete ${workspace.name}`} onClick={() => openDelete(workspace)}><Icon name="trash" /></button> : null}</div></span>
               </div>
             ))}
           </div>
@@ -59,6 +92,22 @@ export function WorkspacesView() {
         }}
       />
       {sharingWorkspace ? <AccessControlDialog open resourceKind="workspace" resourceId={sharingWorkspace.id} resourceName={sharingWorkspace.name} onClose={() => setSharingWorkspace(undefined)} onSaved={resources.reload} /> : null}
+      <Modal
+        open={Boolean(deletingWorkspace)}
+        title={`Delete ${deletingWorkspace?.name ?? "workspace"}?`}
+        description="Archive this workspace registration without deleting the directory on the Host."
+        onClose={closeDelete}
+        size="small"
+      >
+        <div className="confirm-dialog">
+          {deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}
+          <InlineAlert tone="warning">A workspace used by active Boxes cannot be deleted.</InlineAlert>
+          <div className="modal__actions">
+            <Button disabled={deleteBusy} onClick={closeDelete}>Cancel</Button>
+            <Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => void deleteWorkspace()}>Delete workspace</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -395,7 +395,7 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
 	var configSnapshot, presentationContext []byte
 	err := tx.QueryRow(ctx, `
         SELECT b.organization_id, b.host_id, b.runtime_type, w.real_path,
-               COALESCE(av.model, ''), h.current_daemon_instance_id::text,
+               COALESCE(b.model_override, av.model, ''), h.current_daemon_instance_id::text,
                jsonb_build_object(
                    'agentVersionId', av.id,
                    'systemPrompt', av.system_prompt,
@@ -484,8 +484,15 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
 		startPayload["systemPrompt"] = runtimeSnapshot.SystemPrompt
 	}
 	approvalMode := strings.TrimSpace(runtimeSnapshot.ApprovalPolicy.Mode)
-	if approvalMode == "" && runtimeType == "omp" {
-		approvalMode = "always-ask"
+	if approvalMode == "" {
+		switch runtimeType {
+		case "omp":
+			approvalMode = "yolo"
+		case "codex":
+			approvalMode = "never"
+		case "claude":
+			approvalMode = "bypass"
+		}
 	}
 	if approvalMode != "" {
 		startPayload["approvalMode"] = approvalMode

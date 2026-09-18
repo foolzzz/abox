@@ -9,7 +9,7 @@
 
 用户可以通过 Tailscale 虚拟局域网，在手机或外部电脑的 Web Console 中持续访问运行在本机或服务器上的 Agent Box。Agent 在用户断开页面后继续工作，用户重新连接后可以恢复对话、查看事件并继续下达指令。
 
-第一版围绕 OMP 与 Codex Runtime 提供完整可用产品；Claude Code Adapter 保留在代码中，但默认关闭，作为下一期功能。
+第一版围绕 OMP、Codex 与 Claude Code Runtime 提供完整可用产品；三种 Runtime 都可用于结构化后台执行和原生 Agent Terminal。
 
 ## 2. 第一版组件
 
@@ -21,7 +21,7 @@
 
 `agentbox-web` 与 `agentbox-server` 是独立开发组件；首版允许 Web 静态资源嵌入 Server 进行单点部署。
 
-部署约束：除 `agentboxd` 外，Control Plane 组件统一由 Docker Compose 部署。`agentbox-server` 镜像包含已构建的 Web 静态资源；PostgreSQL 独立容器持久化。`agentboxd` 必须原生运行在 Execution Host，访问系统 OMP/Codex/tmux、项目目录和用户认证。
+部署约束：除 `agentboxd` 外，Control Plane 组件统一由 Docker Compose 部署。`agentbox-server` 镜像包含已构建的 Web 静态资源；PostgreSQL 独立容器持久化。`agentboxd` 必须原生运行在 Execution Host，访问系统 OMP/Codex/Claude/tmux、项目目录和用户认证。
 
 ## 3. 网络与远程访问
 
@@ -36,26 +36,25 @@
 
 ### 4.1 第一版 Runtime
 
-- 对用户开放 OMP 和 Codex Runtime。
-- OMP 使用 `omp --mode rpc`。
-- Codex 使用官方 `codex app-server --listen stdio://` 协议。
-- 两种 Runtime 都直接使用 Execution Host 系统用户现有认证，不由 Agent Box 管理账号或 API Key。
+- 对用户开放 OMP、Codex 和 Claude Code Runtime。
+- OMP 使用 `omp --mode rpc`；Codex 使用官方 `codex app-server --listen stdio://` 协议；Claude Code 使用 stream-json 协议。
+- 三种 Runtime 都直接使用 Execution Host 系统用户现有认证，不由 Agent Box 管理账号或 API Key。
 - 支持多轮 Prompt、Interrupt、Stop、Resume 以及 Runtime 实际声明的能力；不支持的 Steer、Follow-up、Approval 等能力必须准确显示，不允许伪实现。
 
-### 4.2 Agent Definition
+### 4.2 Agent Definition 与 Box 模型
 
-- Runtime 由用户在 OMP 与 Codex 中选择；Claude 仅在下一期 Feature Flag 开启后出现。
-- 模型字段提供 Runtime 对应的建议列表，同时允许用户填写任意模型 ID；留空时使用 Runtime 默认模型。
-- System Prompt 是 Agent 的持久系统指令：定义角色、输出风格、工作原则和安全边界，并在该 Agent 的 Box 会话中持续生效。
-- System Prompt 不用于填写单次任务，不允许保存账号、API Key 或其他 Secret；单次工作通过 Box 的 Prompt 输入。
+- Runtime 由用户在 OMP、Codex 与 Claude Code 中选择。
+- 模型字段提供 Runtime 对应的建议列表，同时允许用户填写任意模型 ID。
+- 新 Box 固定引用创建时的 Agent Version，并默认使用该版本的模型；Box 可保存独立的 `model_override`，只影响该 Box。清空覆盖值后恢复 pinned Agent Version 模型；两者都为空时使用 Runtime CLI 默认模型。
+- System Prompt 是可选的 Agent 持久指令；留空时使用 OMP/Codex/Claude CLI 自身默认 System Prompt。
+- System Prompt 不允许保存账号、API Key 或其他 Secret；单次工作通过 Agent Terminal 输入。
 - Agent Definition 更新产生新版本，不修改已经固定版本的 Box。
 
-### 4.3 下一期
+### 4.3 Runtime 权限默认值
 
-- Claude Code stream-json Adapter 可以保留和继续测试。
-- 默认配置 `enableClaude=false`。
-- Server、daemon 和 Web 不得在第一版默认暴露 Claude 创建入口。
-- 启用 Claude 必须通过明确配置，而不是代码修改。
+- 原生 Agent Terminal 和结构化 Adapter 默认跳过 Runtime 自身的交互式权限提示：OMP 使用 `--approval-mode yolo`，Codex 使用 `--dangerously-bypass-approvals-and-sandbox`（App Server 对应 `approvalPolicy=never`、`sandbox=danger-full-access`），Claude Code 使用 `--permission-mode bypassPermissions --allow-dangerously-skip-permissions`。
+- Control Plane 的 Approval Engine、审批记录和轮询仍保留，供显式启用审批的后台流程使用；默认 Runtime 启动策略不会依赖独立 Approval Web 页面。
+- 示例 Server 与 daemon 配置默认启用 Claude Code；Host 缺少 Claude CLI 或认证时，Capability Probe 必须明确报告不可用。
 
 ## 5. Runtime 账号与凭证
 
@@ -111,7 +110,7 @@
 - Web Console 始终在线并支持多人同时访问。
 - Organization 账号角色只保留 `admin` 与 `user`：Admin 管理账号、Agent Definition、Host/Workspace 和组织级资源；User 使用已授权的 Workspace、Box、Schedule、Approval 与 Terminal。
 - 首次启动自动创建默认管理员 `admin/admin123`，密码只保存为 bcrypt hash，并强制首次登录修改；后续启动不得覆盖管理员已修改的密码。
-- Admin 可以创建账号、切换 `admin/user` 角色、启用/禁用账号和重置临时密码；系统必须阻止管理员禁用或降级自己，并保证至少一个活跃 Admin。
+- Admin 可以创建、查询、修改和软删除账号，切换 `admin/user` 角色、启用/禁用账号和重置临时密码；系统必须阻止管理员禁用、删除或降级自己，并保证至少一个活跃 Admin。
 - 支持 Workspace ACL 和 Box ACL，资源角色继续使用 Owner/Operator/Viewer，与账号角色分层。
 - 所有登录、密码修改、账号创建/修改/禁用/重置、Prompt、Approval、Stop、ACL 和角色变更必须进入 Audit Log。
 
@@ -122,12 +121,14 @@
 - Agent Terminal 是默认入口，使用 xterm.js → WebSocket → gRPC → PTY → tmux attach → 原生 OMP/Codex TUI。
 - Agent Terminal 中用户发送 Prompt 后可以关闭网页；WebSocket 断开不得停止 Agent、当前任务、Tool 或子进程。
 - 每个 Box 使用固定 tmux Session `abox-agent-<box-id>`；重新进入时 attach 同一 Session。
-- Subagent、Todo、Artifact、Diff、Approval 与 Schedule 保留独立的结构化查看页面；不再提供结构化聊天 Console。
+- Subagent、Todo、Artifact、Diff、Notification 与 Schedule 保留独立结构化页面；Approval Engine 仅作为后台能力，不提供独立审批页面。
 - Command Terminal 是临时项目 Shell，用于 Git、测试、日志和排障，页面离开后可以关闭。
 - 创建 Agent Definition 不启动进程；Box 第一次进入 Agent Terminal 时按需启动 Runtime/tmux Session。
 - 单 Box 同一时间最多一个 Main Run；Prompt、Follow-up、Steer 保持原有语义。
 - Runtime 空闲后可以 Hibernation；下一 Prompt 自动 Resume。
 - 删除 Box 会终止 Runtime、kill 对应 tmux Agent Terminal、从默认列表移除 Session，并保留 Audit/短期恢复数据。
+- Box 创建者默认拥有 Private Box；仅创建者和 Admin 可切换为 Organization Visible，Admin 始终可查看全部 Box。
+- Agent Definition、未被活跃 Box/Schedule 引用的 Agent、未被活跃 Box 使用的 Workspace、无资源依赖的 Offline Host 均支持受保护的软删除。
 
 ## 10. 移动端与呈现上下文
 
@@ -213,15 +214,15 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 
 ### 13.2 Runtime 与 Agent Definition
 
-- [x] 默认显示和启动 OMP 与 Codex。
-- [x] 未显式开启 Feature Flag 时不能创建 Claude Box。
+- [x] 默认显示和启动 OMP、Codex 与 Claude Code。
+- [x] Host 未安装或未登录对应 Runtime 时明确显示不可用，不能创建该 Runtime 的 Box。
 - [x] OMP 使用 Host 当前系统认证完成真实调用。
 - [x] Codex 使用 Host 当前系统认证完成真实调用并保持多轮 Thread。
-- [x] OMP 的 Prompt、Steer、Follow-up、Interrupt、Stop、Resume 实测通过。
-- [x] OMP 的 Subagent、Todo、Tool Event 可展示。
-- [x] OMP Remote Approval 可批准、拒绝和超时默认拒绝。
-- [x] 模型字段同时支持建议列表、自由填写和留空使用 Runtime 默认模型。
-- [x] 页面明确解释 System Prompt 与单次 Prompt 的区别、版本语义和 Secret 边界。
+- [x] Claude Code 使用 Host 当前系统认证完成真实调用。
+- [x] OMP 的 Prompt、Steer、Follow-up、Interrupt、Stop、Resume、Subagent、Todo 与 Tool Event 实测通过。
+- [x] Approval Reaper 和后台 Approval 状态机保留，但 Web 不提供独立审批页面。
+- [x] Agent Definition 模型作为新 Box 默认值；Box 可单独切换模型并安全重启 Runtime/tmux。
+- [x] System Prompt 可留空并使用 Runtime CLI 默认值；模型支持建议列表、自由填写和 Runtime 默认值。
 
 ### 13.3 Remote 与多用户
 
@@ -233,6 +234,8 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] User 调用账号管理、Agent Definition 创建和 Workspace 注册 API 返回 403，但可使用被授权的 Box、Schedule、Approval 与 Terminal。
 - [x] 密码修改、密码重置和账号禁用会撤销旧 Session；禁止管理员锁定自己或移除最后一个活跃 Admin。
 - [x] 多用户消息显示正确作者。
+- [x] Admin 可修改 Legacy Identity 的角色，并可安全软删除账号；账号管理覆盖增删查改。
+- [x] Private Box 仅 Owner/Admin 可见；Organization Visible Box 对普通 User 可见。
 
 ### 13.4 Presentation Context
 
@@ -249,6 +252,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] Webhook 签名错误被拒绝，重复 Idempotency Key 不重复执行。
 - [x] Approval Reaper 和 Hibernation Reaper 在 Server 重启后继续工作。
 - [x] Artifact、Diff、Subagent、Todo、Notification API 与 UI 可用。
+- [x] Admin 可删除未使用的 Agent Definition、Workspace 和 Offline Host；存在活跃依赖时返回 409。
 - [x] Terminal 在授权 Workspace 中运行，不能逃逸 Host 用户 Home 安全边界。
 
 ### 13.6 可靠性与安全
@@ -279,7 +283,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 
 第一版不包含：
 
-- Claude Code 对用户开放。
+- Runtime Policy 可配置化和细粒度 Tool/Skill 强制执行。
 - 模型账号/API Key/OAuth 管理。
 - 公网 Relay。
 - Kubernetes/VM/UTM 生命周期管理。

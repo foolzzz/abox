@@ -15,7 +15,8 @@ import (
 const boxSelect = `
     SELECT b.id, b.organization_id, b.name, b.agent_id, b.agent_version_id,
            b.host_id, b.workspace_id, b.owner_user_id, b.runtime_type,
-           b.status, b.version, b.next_event_seq - 1, b.created_at, b.updated_at
+           COALESCE(b.model_override, (SELECT av.model FROM agent_versions av WHERE av.id = b.agent_version_id), ''),
+           b.visibility, b.status, b.version, b.next_event_seq - 1, b.created_at, b.updated_at
     FROM boxes b`
 
 func (s *Store) ListBoxes(ctx context.Context, user domain.User) ([]domain.Box, error) {
@@ -61,6 +62,10 @@ func (s *Store) ListBoxes(ctx context.Context, user domain.User) ([]domain.Box, 
 func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.CreateBoxInput) (domain.Box, error) {
 	if strings.TrimSpace(input.Name) == "" || input.AgentID == "" || input.HostID == "" || input.WorkspaceID == "" {
 		return domain.Box{}, fmt.Errorf("%w: name, agent, host, and workspace are required", storepkg.ErrInvalidState)
+	}
+	input.Model = strings.TrimSpace(input.Model)
+	if len(input.Model) > 128 {
+		return domain.Box{}, fmt.Errorf("%w: model must not exceed 128 characters", storepkg.ErrInvalidState)
 	}
 	var result domain.Box
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
@@ -143,20 +148,138 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
             INSERT INTO boxes(
                 id, organization_id, name, agent_id, agent_version_id,
                 host_id, workspace_id, owner_user_id, visibility, status,
-                runtime_type, idle_timeout_seconds
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'private','created',$9,$10)`,
+                runtime_type, model_override, idle_timeout_seconds
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'private','created',$9,$10,$11)`,
 			boxID, user.OrganizationID, strings.TrimSpace(input.Name), input.AgentID,
-			agentVersionID, input.HostID, input.WorkspaceID, user.ID, runtimeType, idleTimeout,
+			agentVersionID, input.HostID, input.WorkspaceID, user.ID, runtimeType, nullableText(input.Model), idleTimeout,
 		)
 		if err != nil {
 			return mapError("insert box", err)
 		}
 		if err := insertAudit(ctx, tx, user.OrganizationID, "user", user.ID, "",
 			"box.created", "box", boxID,
-			map[string]any{"agentId": input.AgentID, "agentVersionId": agentVersionID, "hostId": input.HostID, "workspaceId": input.WorkspaceID}); err != nil {
+			map[string]any{"agentId": input.AgentID, "agentVersionId": agentVersionID, "hostId": input.HostID, "workspaceId": input.WorkspaceID, "model": input.Model}); err != nil {
 			return err
 		}
 		result, err = getBoxByOrganization(ctx, tx, user.OrganizationID, boxID)
+		return err
+	})
+	return result, err
+}
+
+func (s *Store) UpdateBoxModel(ctx context.Context, user domain.User, boxID, model string) (domain.Box, *domain.HostCommand, error) {
+	model = strings.TrimSpace(model)
+	if len(model) > 128 {
+		return domain.Box{}, nil, fmt.Errorf("%w: model must not exceed 128 characters", storepkg.ErrInvalidState)
+	}
+	var result domain.Box
+	var command *domain.HostCommand
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		role, err := requireMembership(ctx, tx, user)
+		if err != nil {
+			return err
+		}
+		var organizationID, hostID, ownerUserID, status string
+		var version int64
+		if err := tx.QueryRow(ctx, `
+            SELECT organization_id, host_id, owner_user_id, status, version
+            FROM boxes
+            WHERE organization_id = $1 AND id = $2
+            FOR UPDATE`, user.OrganizationID, boxID).Scan(
+			&organizationID, &hostID, &ownerUserID, &status, &version,
+		); err != nil {
+			return mapError("lock box model", err)
+		}
+		if role != "admin" && ownerUserID != user.ID {
+			return fmt.Errorf("%w: only the box owner or an organization admin can change its model", storepkg.ErrForbidden)
+		}
+		if status == string(domain.BoxTerminated) {
+			return fmt.Errorf("%w: terminated box model cannot be changed", storepkg.ErrConflict)
+		}
+
+		var runtimeID string
+		if err := tx.QueryRow(ctx, `
+            SELECT COALESCE((
+                SELECT id::text FROM runtime_instances
+                WHERE box_id = $1 AND status IN ('starting','ready','busy','stopping')
+                ORDER BY started_at DESC NULLS LAST, id
+                LIMIT 1
+            ), '')`, boxID).Scan(&runtimeID); err != nil {
+			return mapError("find box runtime for model change", err)
+		}
+		if runtimeID != "" {
+			if _, err := tx.Exec(ctx, `
+                UPDATE runtime_instances SET status = 'stopping', version = version + 1
+                WHERE id = $1 AND status IN ('starting','ready','busy')`, runtimeID); err != nil {
+				return mapError("stop runtime for model change", err)
+			}
+			created, err := insertHostCommandTx(ctx, tx, domain.HostCommand{
+				OrganizationID: organizationID, HostID: hostID, BoxID: boxID,
+				RuntimeInstanceID: runtimeID, CommandType: "runtime.stop",
+				Payload:        json.RawMessage(`{"mode":"graceful"}`),
+				IdempotencyKey: fmt.Sprintf("runtime:model-change:%s:%d", boxID, version), Status: "pending",
+			})
+			if err != nil {
+				return err
+			}
+			command = &created
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE boxes
+            SET model_override = $2, updated_at = now(), last_activity_at = now(), version = version + 1
+            WHERE id = $1`, boxID, nullableText(model)); err != nil {
+			return mapError("update box model", err)
+		}
+		if err := insertAudit(ctx, tx, organizationID, "user", user.ID, "",
+			"box.model_changed", "box", boxID, map[string]any{"model": model, "runtimeInstanceId": runtimeID}); err != nil {
+			return err
+		}
+		result, err = getBoxByOrganization(ctx, tx, organizationID, boxID)
+		return err
+	})
+	return result, command, err
+}
+
+func (s *Store) UpdateBoxVisibility(ctx context.Context, user domain.User, boxID, visibility string) (domain.Box, error) {
+	visibility = strings.ToLower(strings.TrimSpace(visibility))
+	if visibility != "private" && visibility != "org" {
+		return domain.Box{}, fmt.Errorf("%w: visibility must be private or org", storepkg.ErrInvalidState)
+	}
+	var result domain.Box
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		role, err := requireMembership(ctx, tx, user)
+		if err != nil {
+			return err
+		}
+		var organizationID, ownerUserID, status, currentVisibility string
+		if err := tx.QueryRow(ctx, `
+            SELECT organization_id, owner_user_id, status, visibility
+            FROM boxes
+            WHERE organization_id = $1 AND id = $2
+            FOR UPDATE`, user.OrganizationID, boxID).Scan(
+			&organizationID, &ownerUserID, &status, &currentVisibility,
+		); err != nil {
+			return mapError("lock box visibility", err)
+		}
+		if role != "admin" && ownerUserID != user.ID {
+			return fmt.Errorf("%w: only the box owner or an organization admin can change visibility", storepkg.ErrForbidden)
+		}
+		if status == string(domain.BoxTerminated) {
+			return fmt.Errorf("%w: terminated box visibility cannot be changed", storepkg.ErrConflict)
+		}
+		if currentVisibility != visibility {
+			if _, err := tx.Exec(ctx, `
+                UPDATE boxes SET visibility = $2, updated_at = now(), version = version + 1
+                WHERE id = $1`, boxID, visibility); err != nil {
+				return mapError("update box visibility", err)
+			}
+			if err := insertAudit(ctx, tx, organizationID, "user", user.ID, "",
+				"box.visibility_changed", "box", boxID,
+				map[string]any{"from": currentVisibility, "to": visibility}); err != nil {
+				return err
+			}
+		}
+		result, err = getBoxByOrganization(ctx, tx, organizationID, boxID)
 		return err
 	})
 	return result, err
@@ -298,7 +421,7 @@ func scanBox(row scanner) (domain.Box, error) {
 	err := row.Scan(
 		&result.ID, &result.OrganizationID, &result.Name, &result.AgentID,
 		&result.AgentVersionID, &result.HostID, &result.WorkspaceID,
-		&result.OwnerUserID, &result.RuntimeType, &result.Status,
+		&result.OwnerUserID, &result.RuntimeType, &result.Model, &result.Visibility, &result.Status,
 		&result.Version, &result.LastEventSeq, &result.CreatedAt, &result.UpdatedAt,
 	)
 	return result, err

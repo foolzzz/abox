@@ -21,17 +21,21 @@ type Store interface {
 	UpdateAccount(ctx context.Context, user domain.User, memberID string, input domain.UpdateAccountInput) (domain.Member, error)
 	ResetAccountPassword(ctx context.Context, user domain.User, memberID, passwordHash string) (domain.Member, error)
 	ListTeams(ctx context.Context, user domain.User) ([]domain.Team, error)
+	DeleteAccount(ctx context.Context, user domain.User, memberID string) error
 
 	ListAgents(ctx context.Context, user domain.User) ([]domain.Agent, error)
+	DeleteAgent(ctx context.Context, user domain.User, agentID string) error
 	CreateAgent(ctx context.Context, user domain.User, input domain.CreateAgentInput) (domain.Agent, error)
 	GetAgent(ctx context.Context, user domain.User, id string) (domain.Agent, error)
 
 	ListHosts(ctx context.Context, user domain.User) ([]domain.Host, error)
+	DeleteHost(ctx context.Context, user domain.User, hostID string) error
 	UpsertHost(ctx context.Context, host domain.Host, daemonInstanceID string, lastAck uint64) (domain.Host, error)
 	TouchHost(ctx context.Context, hostID, daemonInstanceID string, lastAck uint64) error
 	GetHost(ctx context.Context, user domain.User, id string) (domain.Host, error)
 	GetHostForOrganization(ctx context.Context, organizationID, id string) (domain.Host, error)
 
+	DeleteWorkspace(ctx context.Context, user domain.User, workspaceID string) error
 	ListWorkspaces(ctx context.Context, user domain.User) ([]domain.Workspace, error)
 	CreateWorkspace(ctx context.Context, user domain.User, input domain.CreateWorkspaceInput) (domain.Workspace, *domain.HostCommand, error)
 	GetWorkspace(ctx context.Context, user domain.User, id string) (domain.Workspace, error)
@@ -42,6 +46,8 @@ type Store interface {
 	ListBoxes(ctx context.Context, user domain.User) ([]domain.Box, error)
 	CreateBox(ctx context.Context, user domain.User, input domain.CreateBoxInput) (domain.Box, error)
 	DeleteBox(ctx context.Context, user domain.User, boxID string) (*domain.HostCommand, error)
+	UpdateBoxVisibility(ctx context.Context, user domain.User, boxID, visibility string) (domain.Box, error)
+	UpdateBoxModel(ctx context.Context, user domain.User, boxID, model string) (domain.Box, *domain.HostCommand, error)
 	GetBox(ctx context.Context, user domain.User, id string) (domain.Box, error)
 	GetBoxForHost(ctx context.Context, hostID, boxID string) (domain.Box, error)
 	SetBoxStatus(ctx context.Context, boxID string, from []domain.BoxStatus, to domain.BoxStatus) error
