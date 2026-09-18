@@ -203,12 +203,18 @@ func (h *processHandle) writeLine(ctx context.Context, wire []byte) error {
 		return errors.New("codex app-server has exited")
 	default:
 	}
-	payload := make([]byte, len(wire)+1)
-	copy(payload, wire)
-	payload[len(wire)] = '\n'
-	for written := 0; written < len(payload); {
-		count, err := h.stdin.Write(payload[written:])
-		written += count
+	if err := writeAll(h.stdin, wire); err != nil {
+		return err
+	}
+	return writeAll(h.stdin, []byte{'\n'})
+}
+
+func writeAll(writer io.Writer, payload []byte) error {
+	for len(payload) > 0 {
+		count, err := writer.Write(payload)
+		if count > 0 {
+			payload = payload[count:]
+		}
 		if err != nil {
 			return err
 		}

@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -58,7 +60,7 @@ type Server struct {
 	developmentUser domain.User
 	enrollmentToken string
 	serverVersion   string
-	staticDir       string
+	staticRoot      *os.Root
 	logger          *slog.Logger
 
 	approvalPollInterval    time.Duration
@@ -155,6 +157,14 @@ func New(options Options) (*Server, error) {
 			runtimeModels["claude"] = []string{}
 		}
 	}
+	var staticRoot *os.Root
+	if staticDir := strings.TrimSpace(options.StaticDir); staticDir != "" {
+		var err error
+		staticRoot, err = os.OpenRoot(staticDir)
+		if err != nil {
+			return nil, fmt.Errorf("open static directory: %w", err)
+		}
+	}
 
 	metricSet := newMetrics()
 	metricSet.codexEnabled = options.EnableCodex
@@ -165,7 +175,7 @@ func New(options Options) (*Server, error) {
 		developmentUser:         options.DevelopmentUser,
 		enrollmentToken:         options.EnrollmentToken,
 		serverVersion:           options.ServerVersion,
-		staticDir:               options.StaticDir,
+		staticRoot:              staticRoot,
 		logger:                  options.Logger,
 		approvalPollInterval:    options.ApprovalPollInterval,
 		hibernationPollInterval: options.HibernationPollInterval,
@@ -192,6 +202,13 @@ func New(options Options) (*Server, error) {
 
 func (s *Server) Handler() http.Handler {
 	return s.router
+}
+
+func (s *Server) Close() error {
+	if s.staticRoot == nil {
+		return nil
+	}
+	return s.staticRoot.Close()
 }
 
 func (s *Server) RegisterGRPC(registrar grpc.ServiceRegistrar) {
@@ -276,7 +293,7 @@ func (s *Server) routes() http.Handler {
 		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/agent-terminal", s.handleAgentTerminal)
 	})
 
-	if strings.TrimSpace(s.staticDir) != "" {
+	if s.staticRoot != nil {
 		router.NotFound(s.handleStatic)
 	}
 	return router

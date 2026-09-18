@@ -754,15 +754,27 @@ func (s *Server) handleStatic(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	cleanPath := strings.TrimPrefix(path.Clean("/"+request.URL.Path), "/")
-	candidate := filepath.Join(s.staticDir, filepath.FromSlash(cleanPath))
-	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-		http.ServeFile(writer, request, candidate)
+	if serveStaticFile(s.staticRoot, cleanPath, writer, request) {
 		return
 	}
-	indexPath := filepath.Join(s.staticDir, "index.html")
-	if info, err := os.Stat(indexPath); err != nil || info.IsDir() {
+	if !serveStaticFile(s.staticRoot, "index.html", writer, request) {
 		writeProblem(writer, http.StatusNotFound, "not_found", "resource not found")
-		return
 	}
-	http.ServeFile(writer, request, indexPath)
+}
+
+func serveStaticFile(root *os.Root, name string, writer http.ResponseWriter, request *http.Request) bool {
+	if root == nil || name == "" {
+		return false
+	}
+	file, err := root.Open(filepath.FromSlash(name))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		return false
+	}
+	http.ServeContent(writer, request, name, info.ModTime(), file)
+	return true
 }

@@ -406,7 +406,7 @@ func (h *ompHandle) sendCommandWithPrefix(ctx context.Context, prefix, runID, co
 	if prefix != "" {
 		id = prefix + ":" + id
 	}
-	request := make(map[string]any, len(fields)+2)
+	request := make(map[string]any, len(fields))
 	for key, value := range fields {
 		request[key] = value
 	}

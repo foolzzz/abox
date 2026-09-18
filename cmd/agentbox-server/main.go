@@ -99,6 +99,7 @@ func run(logger *slog.Logger, configPath string) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = controlPlane.Close() }()
 
 	httpListener, err := net.Listen("tcp", configuration.HTTPAddr)
 	if err != nil {
