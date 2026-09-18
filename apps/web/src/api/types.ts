@@ -25,7 +25,6 @@ export type RunStatus =
   | "aborted"
   | "lost"
   | "cancelled";
-export type DeliveryMode = "prompt" | "steer" | "follow_up";
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -187,40 +186,6 @@ export interface Run {
   errorMessage?: string;
 }
 
-export interface PresentationContext {
-  viewportWidth: number;
-  viewportHeight: number;
-  deviceClass: "mobile" | "tablet" | "desktop";
-  orientation: "portrait" | "landscape";
-  touch: boolean;
-  locale: string;
-  timezone: string;
-  prefersReducedMotion: boolean;
-  surface: string;
-}
-
-export interface Message {
-  id: string;
-  boxId: string;
-  runId?: string | null;
-  boxSeq?: number;
-  authorType?: string;
-  authorName?: string | null;
-  authorUserId?: string;
-  role: "user" | "assistant" | "system";
-  delivery?: DeliveryMode | null;
-  status: string;
-  content: unknown;
-  plainText?: string;
-  presentationContext?: PresentationContext;
-  createdAt: string;
-}
-
-export interface SendMessageRequest {
-  content: string;
-  delivery: DeliveryMode;
-  presentationContext: PresentationContext;
-}
 
 export interface Approval {
   id: string;
@@ -369,48 +334,6 @@ export interface ApprovalDecisionRequest {
   decision: "approved" | "denied";
 }
 
-export type AgentEventType =
-  | "runtime.starting"
-  | "runtime.ready"
-  | "runtime.exited"
-  | "run.started"
-  | "run.completed"
-  | "run.failed"
-  | "message.started"
-  | "message.delta"
-  | "message.completed"
-  | "tool.started"
-  | "tool.progress"
-  | "tool.completed"
-  | "tool.failed"
-  | "subagent.started"
-  | "subagent.progress"
-  | "subagent.completed"
-  | "todo.updated"
-  | "approval.requested"
-  | "approval.resolved"
-  | "artifact.created"
-  | "notice"
-  | (string & {});
-
-export interface EventActor {
-  kind: "user" | "main_agent" | "subagent" | "system" | "daemon" | string;
-  id?: string | null;
-}
-
-export interface AgentEvent<TPayload extends Record<string, unknown> = Record<string, unknown>> {
-  eventId: string;
-  boxId: string;
-  runId?: string | null;
-  runtimeInstanceId?: string | null;
-  seq: number;
-  type: AgentEventType;
-  occurredAt: string;
-  actor?: EventActor;
-  actorKind?: string;
-  actorId?: string;
-  payload: TPayload;
-}
 
 export interface ApiErrorBody {
   code?: string;

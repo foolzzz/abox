@@ -5,7 +5,6 @@ import { useI18n } from "./lib/i18n";
 import { AgentsView } from "./views/AgentsView";
 import { ApprovalsView } from "./views/ApprovalsView";
 import { BoxAutomationView, type BoxAutomationPanel } from "./views/BoxAutomationView";
-import { BoxDetailView } from "./views/BoxDetailView";
 import { BoxesView } from "./views/BoxesView";
 import { DashboardView } from "./views/DashboardView";
 import { HostsView } from "./views/HostsView";
@@ -36,7 +35,6 @@ export function App() {
     const [, boxId, panel] = pathname.match(/^\/boxes\/([^/]+)\/(subagents|todos|artifacts|diff)$/)!;
     content = <BoxAutomationView boxId={decodeURIComponent(boxId!)} panel={panel as BoxAutomationPanel} />;
   }
-  else if (/^\/boxes\/[^/]+$/.test(pathname)) content = <BoxDetailView boxId={decodeURIComponent(pathname.slice("/boxes/".length))} />;
   else content = <NotFound />;
 
   return <ToastProvider><Shell>{content}</Shell></ToastProvider>;

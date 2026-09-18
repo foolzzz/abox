@@ -18,15 +18,14 @@ Agent Terminal 让用户通过 Web 或移动端远程操作 Execution Host 上�
 
 ## 2. 术语与入口
 
-每个 Box 提供三个不同入口：
+每个 Box 提供两个交互入口：
 
 | 入口 | 用途 | 后端 |
 |---|---|---|
 | Agent Terminal | 原生 OMP/Codex TUI，面向用户持续 Prompt | PTY/tmux/native resume |
-| Agent Console | 结构化 Message、Tool、Todo、Subagent、Approval、Schedule | OMP RPC / Codex App Server |
 | Command Terminal | 临时 Shell，用于 Git、测试、日志和排障 | 直接 PTY + 登录 Shell |
 
-Agent Terminal 与 Agent Console 是独立 Session，不共享实时进程所有权，也不尝试把终端 ANSI 输出转换成结构化 Runtime Event。
+结构化 Runtime 协议继续服务 Schedule、Approval、Audit 和 Projection，但不再提供独立聊天 UI，也不尝试把终端 ANSI 输出转换为结构化消息。
 
 ## 3. 公共架构
 
@@ -304,7 +303,7 @@ Web → HTTP/SSE → Server → gRPC → daemon → OMP RPC / Codex App Server
 - 无法提供 iTerm2/原生 TUI 体验。
 - 与 Agent Terminal 是独立 Session。
 
-定位：保留为 Agent Console，不作为 Agent Terminal Backend。
+定位：仅作为后台 Automation、Approval、Audit 和 Projection 通道，不提供独立 Web Console。
 
 ## 9. 外部组件方案
 
@@ -368,25 +367,20 @@ CHECK (agent_terminal_backend IN (
 
 生产选择器 V1 只开放 `tmux_attach`。`direct_pty` 仅用于诊断，`native_resume` 仅用于 tmux 丢失或机器重启后的恢复；两者都不满足“断线后当前任务继续”的硬性要求。`tmux_control` 在完成兼容矩阵前保持实验状态。
 
-Backend 只能由 Owner/Admin 在创建 Box 时选择；修改 Backend 需要终止现有 Agent Terminal Session，并写入 Audit Log。
+Backend 只能由 Admin 在创建 Box 时选择；修改 Backend 需要终止现有 Agent Terminal Session，并写入 Audit Log。
 
 ## 11. Web 路由与命名
 
 ```text
-/boxes/:id                 Agent Console
-/boxes/:id/agent-terminal  Agent Terminal
+/boxes/:id/agent-terminal   Agent Terminal
 /boxes/:id/command-terminal Command Terminal
+/boxes/:id/subagents        Subagents
+/boxes/:id/todos            Todos
+/boxes/:id/artifacts        Artifacts
+/boxes/:id/diff             Diff
 ```
 
-Box 列表默认进入 Agent Terminal。Box 顶部明确展示：
-
-- Agent Terminal
-- Agent Console
-- Command Terminal
-- Subagents
-- Todos
-- Artifacts
-- Diff
+Box 列表、Approval、Notification 和 Schedule 深链默认进入 Agent Terminal。Box 顶部展示 Agent Terminal、Command Terminal 及四个结构化输出页面。
 
 ## 12. Terminal Transport
 
@@ -534,7 +528,7 @@ direct_pty
 
 实验性高级模式 `tmux_control` 在完成版本兼容矩阵和断线续跑验收前不得开放给生产用户。
 
-Agent Terminal 始终是协议无关的 Terminal Transport；Agent Console 才理解 OMP RPC/Codex App Server 协议。
+Agent Terminal 始终是协议无关的 Terminal Transport；OMP RPC/Codex App Server 只作为后台结构化自动化通道，不形成第二套用户交互入口。
 
 ## 19. Architecture Decision Record：Agent Terminal Backend 选型
 
@@ -577,7 +571,7 @@ Agent Terminal 始终是协议无关的 Terminal Transport；Agent Console 才�
 | Native Resume | 否 | 否 | 是 | 需要 Runtime-specific SessionRef | 新进程恢复 | 中 | 淘汰为默认；保留作灾难恢复 |
 | PTY + tmux attach | 是 | 是 | 是 | 是 | 是 | 中 | **V1 选中** |
 | tmux Control Mode | 是 | 是 | 需要额外 Web 映射 | 是 | 是 | 高 | 延后到多 Pane 阶段 |
-| Runtime Protocol Console | 是 | 是 | 否 | 否 | 是 | 高 | 保留为 Agent Console，不属于 Agent Terminal |
+| Runtime Protocol Console | 是 | 是 | 否 | 否 | 是 | 高 | 仅保留后台协议能力，不提供 Web Console |
 | ttyd 直连 | 否 | 否 | 是 | 是 | 否 | 中 | 淘汰 |
 | ttyd + tmux | 是 | 是 | 是 | 是 | 是 | 中 | 功能满足，但重复现有 Server/daemon/Auth/ACL，淘汰 |
 | cmux | 是 | 是 | 是 | 是 | 是 | — | 作为产品与 Session Restore 参考，不可直接复用为 Web Backend |
@@ -598,7 +592,7 @@ WebSocket 生命周期拥有 PTY；页面关闭即终止 Agent，直接违反“
 
 #### Runtime Protocol Console
 
-结构化能力强，但不是原生 Terminal；保留为独立 Agent Console，不能替代用户要求的 iTerm2 风格入口。
+结构化能力强，但不是原生 Terminal；仅保留其后台 Schedule、Approval、Audit 与 Projection 能力。
 
 #### ttyd/WeTTY/GoTTY
 
@@ -632,14 +626,14 @@ abox-<box-id>
 Agent Terminal
   默认入口；tmux 持久原生 OMP/Codex TUI。
 
-Agent Console
-  OMP RPC/Codex App Server；结构化 Message、Tool、Todo、Approval 和 Schedule。
-
 Command Terminal
   临时 PTY Shell；用于 Git、测试、日志和排障，离开即关闭。
+
+Structured Output
+  Subagent、Todo、Artifact、Diff、Approval 与 Schedule 使用独立只读或操作页面。
 ```
 
-Box 列表默认进入 Agent Terminal。Agent Console 和 Agent Terminal 是独立 Session，不共享活进程，也不伪装共享同一段上下文。
+Box 列表和所有 Box 深链默认进入 Agent Terminal；产品不再维护重复的结构化聊天界面。
 
 ### 19.7 结果与已验证项
 
@@ -655,4 +649,4 @@ Box 列表默认进入 Agent Terminal。Agent Console 和 Agent Terminal 是独�
 - tmux 无法跨机器关机/重启保存活进程；未来使用 Native Resume 恢复 Agent 上下文。
 - V1 只允许一个写入者；多用户观察和抢占需要 Terminal Lease。
 - tmux Control Mode 与 Web 多 Pane UI 延后。
-- Agent Terminal 不产生结构化 Tool/Todo/Approval Event；需要这些能力时使用 Agent Console。
+- Agent Terminal 不渲染结构化 Tool/Todo/Approval Event；这些信息分别进入 Todo、Subagent、Artifact、Approval 等专用页面。

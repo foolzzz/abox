@@ -47,7 +47,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
     setStatus("connecting");
     setError(undefined);
     const terminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink: false,
       convertEol: true,
       fontFamily: "JetBrains Mono, SFMono-Regular, Consolas, monospace",
       fontSize: 13,
@@ -106,7 +106,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
         }
         if (message.data) {
           const binary = atob(message.data);
-          terminal.write(Uint8Array.from(binary, (value) => value.charCodeAt(0)));
+          terminal.write(Uint8Array.from(binary, (value) => value.charCodeAt(0)), () => terminal.refresh(0, terminal.rows - 1));
         }
         if (message.error) terminal.writeln(`\r\n\x1b[31m${message.error}\x1b[0m`);
         if (message.closed) {
@@ -169,7 +169,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
     <div className="page terminal-page">
       <header className="page-heading terminal-heading">
         <div>
-          <Link className="back-link" to={`/boxes/${boxId}`}>{t("shell.boxSession")}</Link>
+          <Link className="back-link" to="/boxes">{t("nav.boxes")}</Link>
           <p className="eyebrow">{t(isAgentTerminal ? "terminal.agentEyebrow" : "terminal.commandEyebrow")}</p>
           <h1>{t(isAgentTerminal ? "terminal.agentTitle" : "terminal.commandTitle")}</h1>
           <p>{t(isAgentTerminal ? "terminal.agentDescription" : "terminal.commandDescription")}</p>
@@ -177,10 +177,13 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
         </div>
         <div className="terminal-heading__actions"><StatusChip status={status} /><Button icon="refresh" onClick={() => setConnectionGeneration((value) => value + 1)}>{t("terminal.reconnect")}</Button><Button icon="expand" onClick={() => void toggleFullscreen()}>{t("terminal.fullscreen")}</Button></div>
       </header>
-      <nav className="box-panel-nav box-panel-nav--console" aria-label={t("shell.boxOutput")}>
-        <Link className="box-panel-nav__item" to={`/boxes/${boxId}`}><Icon name="activity" /><span>{t("box.agentConsole")}</span></Link>
+      <nav className="box-panel-nav" aria-label={t("shell.boxOutput")}>
         <Link className={isAgentTerminal ? "box-panel-nav__item box-panel-nav__item--active" : "box-panel-nav__item"} to={`/boxes/${boxId}/agent-terminal`}><Icon name="terminal" /><span>{t("box.agentTerminal")}</span></Link>
         <Link className={!isAgentTerminal ? "box-panel-nav__item box-panel-nav__item--active" : "box-panel-nav__item"} to={`/boxes/${boxId}/command-terminal`}><Icon name="terminal" /><span>{t("box.commandTerminal")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/subagents`}><Icon name="agent" /><span>{t("box.subagents")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/todos`}><Icon name="todo" /><span>{t("box.todos")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/artifacts`}><Icon name="artifact" /><span>{t("box.artifacts")}</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/diff`}><Icon name="diff" /><span>{t("box.diff")}</span></Link>
       </nav>
       {error ? <div className="stream-warning" role="alert">{error}</div> : null}
       <section className="terminal-surface" aria-label={t(isAgentTerminal ? "terminal.agentAria" : "terminal.commandAria")} ref={surface}>

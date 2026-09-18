@@ -118,13 +118,13 @@
 ## 9. Box、Session 与交互入口
 
 - Agent Definition、Agent Box、Execution Host 分离；Agent Box 本质是绑定 Agent、Host、项目目录的长期工作 Session。
-- 每个 Box 提供三个明确入口：Agent Terminal、Agent Console、Command Terminal。
+- 每个 Box 提供两个交互入口：Agent Terminal 与 Command Terminal；Box 列表和所有 Box 深链默认进入 Agent Terminal。
 - Agent Terminal 是默认入口，使用 xterm.js → WebSocket → gRPC → PTY → tmux attach → 原生 OMP/Codex TUI。
 - Agent Terminal 中用户发送 Prompt 后可以关闭网页；WebSocket 断开不得停止 Agent、当前任务、Tool 或子进程。
 - 每个 Box 使用固定 tmux Session `abox-agent-<box-id>`；重新进入时 attach 同一 Session。
-- Agent Console 使用 OMP RPC/Codex App Server，提供结构化 Message、Tool、Todo、Subagent、Approval 和 Schedule。
+- Subagent、Todo、Artifact、Diff、Approval 与 Schedule 保留独立的结构化查看页面；不再提供结构化聊天 Console。
 - Command Terminal 是临时项目 Shell，用于 Git、测试、日志和排障，页面离开后可以关闭。
-- 创建 Agent Definition 不启动进程；Box 第一次进入对应入口时按需启动 Runtime/Terminal。
+- 创建 Agent Definition 不启动进程；Box 第一次进入 Agent Terminal 时按需启动 Runtime/tmux Session。
 - 单 Box 同一时间最多一个 Main Run；Prompt、Follow-up、Steer 保持原有语义。
 - Runtime 空闲后可以 Hibernation；下一 Prompt 自动 Resume。
 - 删除 Box 会终止 Runtime、kill 对应 tmux Agent Terminal、从默认列表移除 Session，并保留 Audit/短期恢复数据。
@@ -269,7 +269,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] 浏览器关闭后 tmux Session 和后台命令继续运行。
 - [x] 新 WebSocket 能重新 attach 同一 tmux Session。
 - [x] daemon 重启后仍能 attach Host 上存活的 tmux Session。
-- [x] Agent Console、Agent Terminal、Command Terminal 在 Web 中有独立入口和名称。
+- [x] Agent Terminal、Command Terminal、Subagent、Todo、Artifact 和 Diff 在 Web 中有独立入口；不存在重复的结构化聊天 Console。
 - [x] Command Terminal 保持临时 PTY 语义。
 - [x] 删除 Box 会从列表隐藏 Session，并终止 Managed Runtime 和 tmux Agent Terminal。
 - [ ] 真实手机/Tailnet 网络切换后重新 attach 同一 tmux Session。

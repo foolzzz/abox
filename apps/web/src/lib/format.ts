@@ -1,4 +1,3 @@
-import { isObjectRecord } from "./data";
 import { activeLocale } from "./i18n";
 
 
@@ -39,32 +38,6 @@ export function initials(value: string): string {
 }
 
 
-export function messageText(content: unknown, plainText?: string): string {
-  if (plainText) return plainText;
-  if (typeof content === "string") {
-    try {
-      const parsed: unknown = JSON.parse(content);
-      if (typeof parsed === "string") return parsed;
-      return extractText(parsed) || content;
-    } catch {
-      return content;
-    }
-  }
-  return extractText(content) || JSON.stringify(content, null, 2);
-}
-
-export function extractText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map(extractText).filter(Boolean).join("\n");
-  if (!isObjectRecord(value)) return "";
-  for (const key of ["text", "plainText", "message", "content", "delta", "thinking"]) {
-    if (key in value) {
-      const text = extractText(value[key]);
-      if (text) return text;
-    }
-  }
-  return "";
-}
 
 export function compactJson(value: unknown): string {
   if (value === undefined) return "";

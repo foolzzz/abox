@@ -65,7 +65,7 @@ export function ApprovalCard({ approval, onResolved, compact = false, canDecide 
       <div className="approval-card__risk"><span className={`risk-badge risk-badge--${approval.riskLevel}`}>{approval.riskLevel}</span><span>{approval.status === "pending" ? `Expires ${relativeTime(approval.expiresAt)}` : approval.status === "expired" ? `Expired ${relativeTime(approval.expiresAt)}` : `Resolved ${relativeTime(approval.resolvedAt ?? approval.expiresAt)}`}</span><StatusChip status={approval.status} compact /></div>
       <div className="approval-card__main">
         <span className="resource-icon resource-icon--approval"><Icon name="terminal" /></span>
-        <div><p className="eyebrow">Remote tool request</p><h2>{approval.toolName}</h2><Link to={`/boxes/${approval.boxId}`}>Open box <Icon name="arrow" size={14} /></Link></div>
+        <div><p className="eyebrow">Remote tool request</p><h2>{approval.toolName}</h2><Link to={`/boxes/${approval.boxId}/agent-terminal`}>Open Agent Terminal <Icon name="arrow" size={14} /></Link></div>
       </div>
       <dl className="approval-card__facts"><div><dt>Requested</dt><dd>{approval.requestedAt ? relativeTime(approval.requestedAt) : "—"}</dd></div><div><dt>Expires</dt><dd title={approval.expiresAt}>{relativeTime(approval.expiresAt)}</dd></div><div><dt>Run</dt><dd className="mono" title={approval.runId}>{approval.runId.slice(0, 8)}</dd></div>{approval.resolvedAt ? <div><dt>Resolved</dt><dd>{relativeTime(approval.resolvedAt)}</dd></div> : null}</dl>
       {approval.payload && Object.keys(approval.payload).length ? <details className="payload-details"><summary>Request payload</summary><pre>{compactJson(approval.payload)}</pre></details> : null}
