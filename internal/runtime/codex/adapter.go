@@ -168,7 +168,7 @@ func (a *Adapter) Start(ctx context.Context, spec runtimeapi.StartSpec) (runtime
 	params := map[string]any{
 		"cwd":            workspace,
 		"approvalPolicy": "never",
-		"sandbox":        "workspace-write",
+		"sandbox":        "danger-full-access",
 	}
 	if spec.Model != "" {
 		params["model"] = spec.Model

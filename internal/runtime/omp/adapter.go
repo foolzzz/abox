@@ -142,9 +142,11 @@ func (a *Adapter) Start(ctx context.Context, spec runtime.StartSpec) (runtime.Ha
 	if spec.SystemPromptFile != "" {
 		args = append(args, "--append-system-prompt", spec.SystemPromptFile)
 	}
-	if spec.ApprovalMode != "" {
-		args = append(args, "--approval-mode", spec.ApprovalMode)
+	approvalMode := strings.TrimSpace(spec.ApprovalMode)
+	if approvalMode == "" {
+		approvalMode = "yolo"
 	}
+	args = append(args, "--approval-mode", approvalMode)
 	if spec.SessionRef != "" {
 		args = append(args, "--resume", spec.SessionRef)
 	}

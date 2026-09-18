@@ -9,7 +9,7 @@
 
 用户可以通过 Tailscale 虚拟局域网，在手机或外部电脑的 Web Console 中持续访问运行在本机或服务器上的 Agent Box。Agent 在用户断开页面后继续工作，用户重新连接后可以恢复对话、查看事件并继续下达指令。
 
-第一版围绕 OMP 与 Codex Runtime 提供完整可用产品；Claude Code Adapter 保留在代码中，但默认关闭，作为下一期功能。
+第一版围绕 OMP、Codex 与 Claude Code Runtime 提供完整可用产品；三种 Runtime 都可用于结构化后台执行和原生 Agent Terminal。
 
 ## 2. 第一版组件
 
@@ -21,7 +21,7 @@
 
 `agentbox-web` 与 `agentbox-server` 是独立开发组件；首版允许 Web 静态资源嵌入 Server 进行单点部署。
 
-部署约束：除 `agentboxd` 外，Control Plane 组件统一由 Docker Compose 部署。`agentbox-server` 镜像包含已构建的 Web 静态资源；PostgreSQL 独立容器持久化。`agentboxd` 必须原生运行在 Execution Host，访问系统 OMP/Codex/tmux、项目目录和用户认证。
+部署约束：除 `agentboxd` 外，Control Plane 组件统一由 Docker Compose 部署。`agentbox-server` 镜像包含已构建的 Web 静态资源；PostgreSQL 独立容器持久化。`agentboxd` 必须原生运行在 Execution Host，访问系统 OMP/Codex/Claude/tmux、项目目录和用户认证。
 
 ## 3. 网络与远程访问
 
@@ -36,26 +36,25 @@
 
 ### 4.1 第一版 Runtime
 
-- 对用户开放 OMP 和 Codex Runtime。
-- OMP 使用 `omp --mode rpc`。
-- Codex 使用官方 `codex app-server --listen stdio://` 协议。
-- 两种 Runtime 都直接使用 Execution Host 系统用户现有认证，不由 Agent Box 管理账号或 API Key。
+- 对用户开放 OMP、Codex 和 Claude Code Runtime。
+- OMP 使用 `omp --mode rpc`；Codex 使用官方 `codex app-server --listen stdio://` 协议；Claude Code 使用 stream-json 协议。
+- 三种 Runtime 都直接使用 Execution Host 系统用户现有认证，不由 Agent Box 管理账号或 API Key。
 - 支持多轮 Prompt、Interrupt、Stop、Resume 以及 Runtime 实际声明的能力；不支持的 Steer、Follow-up、Approval 等能力必须准确显示，不允许伪实现。
 
-### 4.2 Agent Definition
+### 4.2 Agent Definition 与 Box 模型
 
-- Runtime 由用户在 OMP 与 Codex 中选择；Claude 仅在下一期 Feature Flag 开启后出现。
-- 模型字段提供 Runtime 对应的建议列表，同时允许用户填写任意模型 ID；留空时使用 Runtime 默认模型。
+- Runtime 由用户在 OMP、Codex 与 Claude Code 中选择。
+- 模型字段提供 Runtime 对应的建议列表，同时允许用户填写任意模型 ID。
+- 新 Box 固定引用创建时的 Agent Version，并默认使用该版本的模型；Box 可保存独立的 `model_override`，只影响该 Box。清空覆盖值后恢复 pinned Agent Version 模型；两者都为空时使用 Runtime CLI 默认模型。
 - System Prompt 是 Agent 的持久系统指令：定义角色、输出风格、工作原则和安全边界，并在该 Agent 的 Box 会话中持续生效。
 - System Prompt 不用于填写单次任务，不允许保存账号、API Key 或其他 Secret；单次工作通过 Box 的 Prompt 输入。
 - Agent Definition 更新产生新版本，不修改已经固定版本的 Box。
 
-### 4.3 下一期
+### 4.3 Runtime 权限默认值
 
-- Claude Code stream-json Adapter 可以保留和继续测试。
-- 默认配置 `enableClaude=false`。
-- Server、daemon 和 Web 不得在第一版默认暴露 Claude 创建入口。
-- 启用 Claude 必须通过明确配置，而不是代码修改。
+- 原生 Agent Terminal 和结构化 Adapter 默认跳过 Runtime 自身的交互式权限提示：OMP 使用 `--approval-mode yolo`，Codex 使用 `--dangerously-bypass-approvals-and-sandbox`（App Server 对应 `approvalPolicy=never`、`sandbox=danger-full-access`），Claude Code 使用 `--permission-mode bypassPermissions --allow-dangerously-skip-permissions`。
+- Control Plane 的 Approval Engine、审批记录和轮询仍保留，供显式启用审批的后台流程使用；默认 Runtime 启动策略不会依赖独立 Approval Web 页面。
+- 示例 Server 与 daemon 配置默认启用 Claude Code；Host 缺少 Claude CLI 或认证时，Capability Probe 必须明确报告不可用。
 
 ## 5. Runtime 账号与凭证
 

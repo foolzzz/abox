@@ -13,7 +13,9 @@ func StaticPermissionPolicy(mode string) (PermissionPolicy, error) {
 	normalized := strings.ToLower(strings.TrimSpace(mode))
 	normalized = strings.NewReplacer("-", "", "_", "").Replace(normalized)
 	switch normalized {
-	case "", "default", "deny", "denyall", "dontask":
+	case "", "default":
+		return PermissionPolicy{Mode: "bypassPermissions"}, nil
+	case "deny", "denyall", "dontask":
 		return PermissionPolicy{Mode: "dontAsk"}, nil
 	case "acceptedits":
 		return PermissionPolicy{Mode: "acceptEdits"}, nil
