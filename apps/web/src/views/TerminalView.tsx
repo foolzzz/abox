@@ -46,6 +46,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
   const [modelBusy, setModelBusy] = useState(false);
   const [settingsError, setSettingsError] = useState<string>();
   const [visibilityBusy, setVisibilityBusy] = useState(false);
+  const [sessionCopied, setSessionCopied] = useState(false);
   const context = useResource(async (signal) => {
     const [box, hosts, workspaces] = await Promise.all([api.getBox(boxId, signal), api.listHosts(signal), api.listWorkspaces(signal)]);
     return {
@@ -223,6 +224,12 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
   };
   const runtimeType = context.data?.box.runtimeType as RuntimeType | undefined;
   const modelSuggestions = runtimeType ? meta?.runtimeModels[runtimeType] ?? [] : [];
+  const terminalSessionID = `abox-agent-${boxId}`;
+  const copySessionID = async () => {
+    await navigator.clipboard.writeText(terminalSessionID);
+    setSessionCopied(true);
+    window.setTimeout(() => setSessionCopied(false), 1500);
+  };
 
   return (
     <div className="page terminal-page">
@@ -232,9 +239,9 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
           <p className="eyebrow">{t(isAgentTerminal ? "terminal.agentEyebrow" : "terminal.commandEyebrow")}</p>
           <h1>{t(isAgentTerminal ? "terminal.agentTitle" : "terminal.commandTitle")}</h1>
           <p>{t(isAgentTerminal ? "terminal.agentDescription" : "terminal.commandDescription")}</p>
-          <dl className="terminal-context"><div><dt>{t("box.host")}</dt><dd>{context.data?.host ? `${context.data.host.name} · ${context.data.host.systemHostname || "hostname unavailable"}` : "—"}</dd></div><div><dt>{t("box.workspace")}</dt><dd className="mono" title={context.data?.workspace?.path}>{context.data?.workspace?.path ?? "—"}</dd></div>{isAgentTerminal ? <div><dt>Session</dt><dd className="mono">abox-agent-{boxId.slice(0, 8)}</dd></div> : null}</dl>
+          <dl className="terminal-context"><div><dt>{t("box.host")}</dt><dd>{context.data?.host ? `${context.data.host.name} · ${context.data.host.systemHostname || "hostname unavailable"}` : "—"}</dd></div><div><dt>{t("box.workspace")}</dt><dd className="mono" title={context.data?.workspace?.path}>{context.data?.workspace?.path ?? "—"}</dd></div></dl>
         </div>
-        <div className="terminal-heading__actions"><StatusChip status={status} />{isAgentTerminal && canManageBox ? <Button icon="edit" onClick={() => { setModelValue(context.data?.box.model ?? ""); setModelOpen(true); }}>Model: {context.data?.box.model || "default"}</Button> : null}{canManageBox ? <Button icon="share" busy={visibilityBusy} onClick={() => void toggleVisibility()}>{context.data?.box.visibility === "org" ? "Organization visible" : "Private"}</Button> : null}<Button icon="refresh" onClick={() => setConnectionGeneration((value) => value + 1)}>{t("terminal.reconnect")}</Button><Button icon="expand" onClick={() => void toggleFullscreen()}>{t("terminal.fullscreen")}</Button>{canDelete ? <Button variant="danger" icon="trash" onClick={() => setDeleteOpen(true)}>{t("box.delete")}</Button> : null}</div>
+        <div className="terminal-heading__actions">{isAgentTerminal ? <button className="terminal-session-id" type="button" onClick={() => void copySessionID()} title="Copy session_id"><span>session_id</span><code>{terminalSessionID}</code><Icon name="copy" size={14} />{sessionCopied ? <b>Copied</b> : null}</button> : null}<StatusChip status={status} />{isAgentTerminal && canManageBox ? <Button icon="edit" onClick={() => { setModelValue(context.data?.box.model ?? ""); setModelOpen(true); }}>Model: {context.data?.box.model || "default"}</Button> : null}{canManageBox ? <Button icon="share" busy={visibilityBusy} onClick={() => void toggleVisibility()}>{context.data?.box.visibility === "org" ? "Organization visible" : "Private"}</Button> : null}<Button icon="refresh" onClick={() => setConnectionGeneration((value) => value + 1)}>{t("terminal.reconnect")}</Button><Button icon="expand" onClick={() => void toggleFullscreen()}>{t("terminal.fullscreen")}</Button>{canDelete ? <Button variant="danger" icon="trash" onClick={() => setDeleteOpen(true)}>{t("box.delete")}</Button> : null}</div>
       </header>
       <nav className="box-panel-nav" aria-label={t("shell.boxOutput")}>
         <Link className={isAgentTerminal ? "box-panel-nav__item box-panel-nav__item--active" : "box-panel-nav__item"} to={`/boxes/${boxId}/agent-terminal`}><Icon name="terminal" /><span>{t("box.agentTerminal")}</span></Link>

@@ -35,6 +35,7 @@ export type IconName =
   | "diff"
   | "download"
   | "edit"
+  | "copy"
   | "trash";
 
 interface IconProps extends SVGProps<SVGSVGElement> {
@@ -78,6 +79,7 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     diff: <><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M8 5h3a7 7 0 0 1 7 7"/></>,
     download: <><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></>,
     edit: <><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Z"/><path d="m13 7 4 4"/></>,
+    copy: <><rect x="7" y="7" width="13" height="13" rx="2"/><path d="M4 17H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1"/></>,
     trash: <><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></>
   };
   return (
