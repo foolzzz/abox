@@ -76,15 +76,16 @@ func (s *Store) DeleteHost(ctx context.Context, user domain.User, hostID string)
 		if status != domain.HostOffline {
 			return fmt.Errorf("%w: host must be offline before deletion", storepkg.ErrConflict)
 		}
-		var activeBoxes, activeWorkspaces int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM boxes WHERE host_id = $1 AND status <> 'terminated'`, hostID).Scan(&activeBoxes); err != nil {
-			return mapError("count host boxes", err)
+		var hasActiveBoxes, hasWorkspaces bool
+		if err := tx.QueryRow(ctx, `
+            SELECT
+                EXISTS(SELECT 1 FROM boxes WHERE organization_id = $1 AND host_id = $2 AND status <> 'terminated'),
+                EXISTS(SELECT 1 FROM workspaces WHERE organization_id = $1 AND host_id = $2 AND status <> 'archived')`,
+			user.OrganizationID, hostID).Scan(&hasActiveBoxes, &hasWorkspaces); err != nil {
+			return mapError("check host dependencies", err)
 		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM workspaces WHERE host_id = $1 AND status <> 'archived'`, hostID).Scan(&activeWorkspaces); err != nil {
-			return mapError("count host workspaces", err)
-		}
-		if activeBoxes > 0 || activeWorkspaces > 0 {
-			return fmt.Errorf("%w: host has %d active boxes and %d workspaces", storepkg.ErrConflict, activeBoxes, activeWorkspaces)
+		if hasActiveBoxes || hasWorkspaces {
+			return fmt.Errorf("%w: host is referenced by active boxes or non-archived workspaces", storepkg.ErrConflict)
 		}
 		if _, err := tx.Exec(ctx, `
             UPDATE hosts
@@ -489,12 +490,16 @@ func (s *Store) DeleteWorkspace(ctx context.Context, user domain.User, workspace
 		if status == "archived" {
 			return nil
 		}
-		var activeBoxes int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM boxes WHERE workspace_id = $1 AND status <> 'terminated'`, workspaceID).Scan(&activeBoxes); err != nil {
-			return mapError("count workspace boxes", err)
+		var hasActiveBoxes bool
+		if err := tx.QueryRow(ctx, `
+            SELECT EXISTS(
+                SELECT 1 FROM boxes
+                WHERE organization_id = $1 AND workspace_id = $2 AND status <> 'terminated'
+            )`, user.OrganizationID, workspaceID).Scan(&hasActiveBoxes); err != nil {
+			return mapError("check workspace dependencies", err)
 		}
-		if activeBoxes > 0 {
-			return fmt.Errorf("%w: workspace is used by %d active boxes", storepkg.ErrConflict, activeBoxes)
+		if hasActiveBoxes {
+			return fmt.Errorf("%w: workspace is referenced by active boxes", storepkg.ErrConflict)
 		}
 		if _, err := tx.Exec(ctx, `
             UPDATE workspaces

@@ -196,15 +196,16 @@ func (s *Store) DeleteAgent(ctx context.Context, user domain.User, agentID strin
 		if status == "archived" {
 			return nil
 		}
-		var boxCount, scheduleCount int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM boxes WHERE agent_id = $1 AND status <> 'terminated'`, agentID).Scan(&boxCount); err != nil {
-			return mapError("count agent boxes", err)
+		var hasActiveBoxes, hasSchedules bool
+		if err := tx.QueryRow(ctx, `
+            SELECT
+                EXISTS(SELECT 1 FROM boxes WHERE organization_id = $1 AND agent_id = $2 AND status <> 'terminated'),
+                EXISTS(SELECT 1 FROM schedules WHERE organization_id = $1 AND agent_id = $2 AND status <> 'deleted')`,
+			user.OrganizationID, agentID).Scan(&hasActiveBoxes, &hasSchedules); err != nil {
+			return mapError("check agent dependencies", err)
 		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM schedules WHERE agent_id = $1 AND status <> 'deleted'`, agentID).Scan(&scheduleCount); err != nil {
-			return mapError("count agent schedules", err)
-		}
-		if boxCount > 0 || scheduleCount > 0 {
-			return fmt.Errorf("%w: agent is used by %d active boxes and %d schedules", storepkg.ErrConflict, boxCount, scheduleCount)
+		if hasActiveBoxes || hasSchedules {
+			return fmt.Errorf("%w: agent is referenced by active boxes or non-deleted schedules", storepkg.ErrConflict)
 		}
 		if _, err := tx.Exec(ctx, `
             UPDATE agents SET status = 'archived', archived_at = now(), updated_at = now(), version = version + 1

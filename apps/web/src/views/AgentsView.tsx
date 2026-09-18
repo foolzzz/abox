@@ -39,6 +39,37 @@ export function AgentsView() {
 
   const data = resource.data!;
   const visibleAgents = data.agents.filter((agent) => runtimeTypes.includes(agent.runtimeType));
+
+  const openDelete = (agent: Agent) => {
+    setDeleteError(undefined);
+    setDeletingAgent(agent);
+  };
+
+  const closeDelete = () => {
+    if (deleteBusy) return;
+    setDeleteError(undefined);
+    setDeletingAgent(undefined);
+  };
+
+  const deleteAgent = async () => {
+    const agent = deletingAgent;
+    if (!agent) return;
+    setDeleteBusy(true);
+    setDeleteError(undefined);
+    try {
+      await api.deleteAgent(agent.id);
+      resource.setData((current) => current ? {
+        ...current,
+        agents: current.agents.filter((candidate) => candidate.id !== agent.id)
+      } : current);
+      notify(`${agent.name} was deleted.`);
+      setDeletingAgent(undefined);
+    } catch (error) {
+      setDeleteError(errorMessage(error));
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
   return (
     <div className="page">
       <PageHeader
@@ -51,7 +82,7 @@ export function AgentsView() {
       {!canCreate ? <p className="permission-caption">Only administrators can create agent definitions.</p> : null}
       {visibleAgents.length ? (
         <section className="card-grid" aria-label="Agent definitions">
-          {visibleAgents.map((agent) => <AgentCard agent={agent} canDelete={canCreate} onDelete={() => setDeletingAgent(agent)} key={agent.id} />)}
+          {visibleAgents.map((agent) => <AgentCard agent={agent} canDelete={canCreate} onDelete={() => openDelete(agent)} key={agent.id} />)}
         </section>
       ) : (
         <EmptyState icon="agent" title={t("agents.empty")} description={t(canCreate ? "agents.emptyAdmin" : "agents.emptyViewer")} action={canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/agents?create=1")}>{t("agents.new")}</Button> : undefined} />
@@ -67,7 +98,22 @@ export function AgentsView() {
           navigate("/agents", { replace: true });
         }}
       />
-      <Modal open={Boolean(deletingAgent)} title={`Delete ${deletingAgent?.name ?? "Agent"}?`} description="The definition will be archived and removed from the Agent list." onClose={() => !deleteBusy && setDeletingAgent(undefined)} size="small"><div className="confirm-dialog">{deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}<InlineAlert tone="warning">Agents used by active Boxes or Schedules cannot be deleted.</InlineAlert><div className="modal__actions"><Button disabled={deleteBusy} onClick={() => setDeletingAgent(undefined)}>Cancel</Button><Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => { if (!deletingAgent) return; setDeleteBusy(true); setDeleteError(undefined); void api.deleteAgent(deletingAgent.id).then(() => { resource.setData((current) => current ? { ...current, agents: current.agents.filter((agent) => agent.id !== deletingAgent.id) } : current); notify(`${deletingAgent.name} was deleted.`); setDeletingAgent(undefined); }, (error: unknown) => setDeleteError(errorMessage(error))).finally(() => setDeleteBusy(false)); }}>Delete Agent</Button></div></div></Modal>
+      <Modal
+        open={Boolean(deletingAgent)}
+        title={`Delete ${deletingAgent?.name ?? "Agent"}?`}
+        description="The definition will be archived and removed from the Agent list."
+        onClose={closeDelete}
+        size="small"
+      >
+        <div className="confirm-dialog">
+          {deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}
+          <InlineAlert tone="warning">Agents used by active Boxes or non-deleted Schedules cannot be deleted.</InlineAlert>
+          <div className="modal__actions">
+            <Button disabled={deleteBusy} onClick={closeDelete}>Cancel</Button>
+            <Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => void deleteAgent()}>Delete Agent</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

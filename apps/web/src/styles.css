@@ -116,6 +116,9 @@ button:disabled { cursor: not-allowed; }
 .button--ghost { color: var(--text-muted); background: transparent; border-color: var(--border-soft); }
 .icon-button { display: inline-grid; width: 38px; height: 38px; place-items: center; padding: 0; color: var(--text-muted); background: transparent; border: 1px solid var(--border-soft); border-radius: 9px; }
 .icon-button:hover { color: var(--text); background: var(--surface-2); }
+.icon-button--danger { color: #ff9aa2; border-color: rgba(255, 124, 134, 0.24); }
+.icon-button--danger:hover { color: #ffd9dc; background: var(--red-soft); }
+.table-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
 .text-link { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 0.78rem; font-weight: 600; }
 .text-link:hover { color: var(--teal); }
 .back-link { color: var(--text-muted); font-size: 0.78rem; font-weight: 600; }
@@ -194,6 +197,7 @@ button:disabled { cursor: not-allowed; }
 .resource-card__facts div { min-width: 0; }
 .resource-card__facts dt { margin-bottom: 4px; color: var(--text-faint); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; }
 .resource-card__facts dd { margin: 0; overflow: hidden; font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
+.resource-card__actions { display: flex; justify-content: flex-end; padding-top: 14px; }
 .host-card { min-height: 260px; }
 .runtime-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 22px; }
 .runtime-list span { padding: 4px 7px; color: var(--blue); background: var(--blue-soft); border-radius: 6px; font-family: "JetBrains Mono", monospace; font-size: 0.64rem; text-transform: uppercase; }
