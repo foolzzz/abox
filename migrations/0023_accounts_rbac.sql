@@ -9,6 +9,9 @@ ALTER TABLE users ALTER COLUMN tailscale_login DROP NOT NULL;
 CREATE UNIQUE INDEX users_username_unique
     ON users(username);
 
+ALTER TABLE organization_members
+    DROP CONSTRAINT IF EXISTS organization_members_role_check;
+
 UPDATE organization_members
 SET role = CASE
     WHEN role IN ('owner', 'admin') THEN 'admin'
@@ -19,8 +22,6 @@ UPDATE users
 SET status = 'disabled'
 WHERE username IS NULL;
 
-ALTER TABLE organization_members
-    DROP CONSTRAINT IF EXISTS organization_members_role_check;
 ALTER TABLE organization_members
     ADD CONSTRAINT organization_members_role_check
     CHECK (role IN ('admin', 'user'));
