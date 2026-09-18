@@ -317,7 +317,7 @@ func canReadWorkspace(ctx context.Context, q querier, user domain.User, workspac
             SELECT 1 FROM workspaces w
             WHERE w.organization_id = $1 AND w.id = $2
               AND (
-                  $4 IN ('owner', 'admin')
+                  $4 = 'admin'
                   OR EXISTS (
                       SELECT 1 FROM workspace_acl wa
                       WHERE wa.workspace_id = w.id
@@ -342,7 +342,7 @@ func canAdminWorkspace(ctx context.Context, q querier, user domain.User, workspa
 	if err != nil {
 		return false, err
 	}
-	if role == "owner" || role == "admin" {
+	if role == "admin" {
 		return true, nil
 	}
 	var allowed bool
@@ -375,7 +375,7 @@ func canAdminBox(ctx context.Context, q querier, user domain.User, boxID string)
             SELECT 1 FROM boxes b
             WHERE b.organization_id = $1 AND b.id = $2
               AND (
-                  $4 IN ('owner', 'admin')
+                  $4 = 'admin'
                   OR b.owner_user_id = $3
                   OR EXISTS (
                       SELECT 1 FROM box_acl ba

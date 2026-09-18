@@ -312,10 +312,10 @@ func (s *Server) handleDiagnostics(writer http.ResponseWriter, request *http.Req
 }
 
 func (s *Server) diagnosticSnapshot(ctx context.Context) serverDiagnosticSnapshot {
-	hosts, hostErr := s.store.ListHosts(ctx, s.developmentUser)
-	boxes, boxErr := s.store.ListBoxes(ctx, s.developmentUser)
-	approvals, approvalErr := s.store.ListApprovals(ctx, s.developmentUser)
-	schedules, scheduleErr := s.store.ListSchedules(ctx, s.developmentUser)
+	hosts, hostErr := s.store.ListHosts(ctx, s.systemUser)
+	boxes, boxErr := s.store.ListBoxes(ctx, s.systemUser)
+	approvals, approvalErr := s.store.ListApprovals(ctx, s.systemUser)
+	schedules, scheduleErr := s.store.ListSchedules(ctx, s.systemUser)
 
 	s.updateHostGauges(hosts, hostErr)
 	s.updateBoxGauges(boxes, boxErr)
@@ -397,8 +397,8 @@ func (s *Server) diagnosticSnapshot(ctx context.Context) serverDiagnosticSnapsho
 }
 
 func (s *Server) refreshOperationalGauges(ctx context.Context) {
-	hosts, hostErr := s.store.ListHosts(ctx, s.developmentUser)
-	boxes, boxErr := s.store.ListBoxes(ctx, s.developmentUser)
+	hosts, hostErr := s.store.ListHosts(ctx, s.systemUser)
+	boxes, boxErr := s.store.ListBoxes(ctx, s.systemUser)
 	s.updateHostGauges(hosts, hostErr)
 	s.updateBoxGauges(boxes, boxErr)
 }

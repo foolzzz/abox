@@ -6,21 +6,44 @@ import (
 )
 
 type User struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organizationId"`
-	Login          string    `json:"login"`
-	DisplayName    string    `json:"displayName"`
-	Role           string    `json:"role"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID                 string    `json:"id"`
+	OrganizationID     string    `json:"organizationId"`
+	Login              string    `json:"login"`
+	DisplayName        string    `json:"displayName"`
+	Role               string    `json:"role"`
+	Status             string    `json:"status"`
+	MustChangePassword bool      `json:"mustChangePassword"`
+	CreatedAt          time.Time `json:"createdAt"`
 }
 
 type Member struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organizationId"`
-	Login          string    `json:"login"`
-	DisplayName    string    `json:"displayName"`
-	Role           string    `json:"role"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID                 string    `json:"id"`
+	OrganizationID     string    `json:"organizationId"`
+	Login              string    `json:"login"`
+	DisplayName        string    `json:"displayName"`
+	Role               string    `json:"role"`
+	Status             string    `json:"status"`
+	HasPassword        bool      `json:"hasPassword"`
+	MustChangePassword bool      `json:"mustChangePassword"`
+	CreatedAt          time.Time `json:"createdAt"`
+}
+
+type AccountCredentials struct {
+	User         User
+	PasswordHash string
+}
+
+type CreateAccountInput struct {
+	Username     string
+	DisplayName  string
+	Role         string
+	PasswordHash string
+}
+
+type UpdateAccountInput struct {
+	DisplayName *string
+	Role        *string
+	Status      *string
 }
 
 type Team struct {

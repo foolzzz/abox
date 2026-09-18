@@ -375,7 +375,7 @@ func notifyBoxAudienceTx(ctx context.Context, tx pgx.Tx, organizationID, boxID, 
         FROM (
             SELECT om.user_id
             FROM organization_members om
-            WHERE om.organization_id = $1 AND om.status = 'active' AND om.role IN ('owner','admin')
+            WHERE om.organization_id = $1 AND om.status = 'active' AND om.role = 'admin'
             UNION
             SELECT b.owner_user_id FROM boxes b WHERE b.organization_id = $1 AND b.id = $2
             UNION
@@ -429,7 +429,7 @@ func notifyHostOfflineTx(ctx context.Context, tx pgx.Tx, organizationID, hostID,
         FROM (
             SELECT om.user_id
             FROM organization_members om
-            WHERE om.organization_id = $1 AND om.status = 'active' AND om.role IN ('owner','admin')
+            WHERE om.organization_id = $1 AND om.status = 'active' AND om.role = 'admin'
             UNION
             SELECT b.owner_user_id FROM boxes b WHERE b.organization_id = $1 AND b.host_id = $2
             UNION

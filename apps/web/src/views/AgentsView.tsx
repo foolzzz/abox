@@ -44,7 +44,7 @@ export function AgentsView() {
         actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/agents?create=1")}>{t("agents.new")}</Button> : null}</>}
       />
       {resource.error ? <InlineAlert tone="warning">{t("agents.stale")}</InlineAlert> : null}
-      {!canCreate ? <p className="permission-caption">{t("agents.readOnly", { role: currentUser?.role ?? "viewer" })}</p> : null}
+      {!canCreate ? <p className="permission-caption">Only administrators can create agent definitions.</p> : null}
       {visibleAgents.length ? (
         <section className="card-grid" aria-label="Agent definitions">
           {visibleAgents.map((agent) => <AgentCard agent={agent} key={agent.id} />)}

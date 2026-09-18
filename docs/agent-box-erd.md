@@ -404,12 +404,16 @@ CREATE INDEX organizations_status_idx ON organizations(status);
 
 ### 5.2 `users`
 
-User 是跨 Organization 的全局身份，MVP 使用 Tailscale Login 映射。
+User 是跨 Organization 的全局 AgentBox 本地账号；Tailscale 不参与用户身份认证。`tailscale_login` 仅保留为升级兼容字段，迁移后对应旧身份默认禁用。
 
 | Column | Type | Null | Default | Constraint / Meaning |
 |---|---|---:|---|---|
 | id | UUID | No | app UUIDv7 | PK |
-| tailscale_login | CITEXT | No | — | 全局唯一 |
+| tailscale_login | CITEXT | Yes | — | 旧版本兼容字段；不再用于登录 |
+| username | CITEXT | Yes | — | 本地账号，全局唯一 |
+| password_hash | TEXT | Yes | — | bcrypt hash，禁止明文 |
+| must_change_password | BOOLEAN | No | `false` | 临时密码首次登录强制修改 |
+| password_changed_at | TIMESTAMPTZ | Yes | — | — |
 | display_name | TEXT | No | — | — |
 | avatar_url | TEXT | Yes | — | — |
 | status | TEXT | No | `active` | `active/disabled` |
@@ -419,6 +423,7 @@ User 是跨 Organization 的全局身份，MVP 使用 Tailscale Login 映射。
 
 ```sql
 UNIQUE (tailscale_login)
+UNIQUE (username)
 CHECK (status IN ('active', 'disabled'))
 ```
 
@@ -428,19 +433,32 @@ CHECK (status IN ('active', 'disabled'))
 |---|---|---:|---|
 | organization_id | UUID | No | PK/FK organizations |
 | user_id | UUID | No | PK/FK users |
-| role | TEXT | No | `owner/admin/operator/viewer` |
+| role | TEXT | No | `admin/user` |
 | status | TEXT | No | `active/suspended` |
 | joined_at | TIMESTAMPTZ | No | default now() |
 | invited_by_user_id | UUID | Yes | FK users |
 
 ```sql
 PRIMARY KEY (organization_id, user_id)
-CHECK (role IN ('owner', 'admin', 'operator', 'viewer'))
+CHECK (role IN ('admin', 'user'))
 CHECK (status IN ('active', 'suspended'))
 CREATE INDEX organization_members_user_idx ON organization_members(user_id, status);
 ```
 
-至少一个 Owner 是应用层不变量；删除/降级最后一个 Owner 必须在事务中拒绝。
+至少一个活跃 Admin 是应用层不变量；系统拒绝管理员禁用或降级自己，并拒绝移除最后一个活跃 Admin。
+
+#### 5.3.1 `user_sessions`
+
+| Column | Type | Null | Meaning |
+|---|---|---:|---|
+| id | UUID | No | PK，应用 UUIDv7 |
+| user_id | UUID | No | FK users，删除用户时级联删除 |
+| token_hash | BYTEA | No | 32-byte SHA-256；唯一，数据库不保存原始 Cookie |
+| expires_at | TIMESTAMPTZ | No | Session 绝对过期时间 |
+| last_seen_at | TIMESTAMPTZ | No | 最近一次使用时间 |
+| created_at | TIMESTAMPTZ | No | default now() |
+
+Session Cookie 使用 `HttpOnly + SameSite=Strict`；HTTPS Public URL 同时设置 `Secure`。密码修改、管理员重置或账号禁用会撤销相关 Session。
 
 ### 5.4 `teams`
 

@@ -17,7 +17,7 @@ interface DashboardData {
 
 export function DashboardView() {
   const { currentUser } = useAccess();
-  const canCreateBox = roleAtLeast(currentUser?.role, "operator");
+  const canCreateBox = roleAtLeast(currentUser?.role, "user");
   const canAdminister = roleAtLeast(currentUser?.role, "admin");
   const resource = useResource<DashboardData>(async (signal) => {
     const [agents, hosts, workspaces, boxes, approvals] = await Promise.all([
@@ -49,7 +49,7 @@ export function DashboardView() {
       <PageHeader
         eyebrow="Command center"
         title={currentUser?.displayName ? `Good to see you, ${currentUser.displayName}.` : "Good to see you."}
-        description={`Live operational state across resources available to your ${currentUser?.role ?? "viewer"} role.`}
+        description={`Live operational state across resources available to your ${currentUser?.role ?? "user"} role.`}
         actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} />{canCreateBox ? <Link className="button button--primary" to="/boxes?create=1"><Icon name="plus" /><span>New box</span></Link> : null}</>}
       />
 

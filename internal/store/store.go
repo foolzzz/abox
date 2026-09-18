@@ -10,9 +10,16 @@ import (
 type Store interface {
 	Close()
 	Migrate(ctx context.Context) error
-	EnsureDevelopmentTenant(ctx context.Context, login string) (domain.User, error)
+	EnsureBootstrapAdmin(ctx context.Context, username, displayName, passwordHash string) (domain.User, bool, error)
+	FindAccountCredentials(ctx context.Context, username string) (domain.AccountCredentials, error)
+	CreateSession(ctx context.Context, userID string, tokenHash []byte, expiresAt time.Time) error
+	UserBySession(ctx context.Context, tokenHash []byte, now time.Time) (domain.User, error)
+	DeleteSession(ctx context.Context, tokenHash []byte) error
+	ChangePassword(ctx context.Context, user domain.User, passwordHash string) error
 	ListMembers(ctx context.Context, user domain.User) ([]domain.Member, error)
-	UpdateMemberRole(ctx context.Context, user domain.User, memberID, role string) (domain.Member, error)
+	CreateAccount(ctx context.Context, user domain.User, input domain.CreateAccountInput) (domain.Member, error)
+	UpdateAccount(ctx context.Context, user domain.User, memberID string, input domain.UpdateAccountInput) (domain.Member, error)
+	ResetAccountPassword(ctx context.Context, user domain.User, memberID, passwordHash string) (domain.Member, error)
 	ListTeams(ctx context.Context, user domain.User) ([]domain.Team, error)
 
 	ListAgents(ctx context.Context, user domain.User) ([]domain.Agent, error)

@@ -10,21 +10,26 @@ import type {
   CreateAgentRequest,
   CreateBoxRequest,
   CreateScheduleRequest,
+  ChangePasswordRequest,
+  CreateAccountRequest,
+  CurrentUser,
   CreateWorkspaceRequest,
   Host,
   Member,
   Message,
   Meta,
+  LoginRequest,
   Notification,
   PendingWorkspaceDiff,
   ReplaceAccessControlRequest,
+  ResetPasswordRequest,
   Schedule,
   ScheduleExecution,
   SendMessageRequest,
   SubagentInstance,
   Team,
   TodoItem,
-  UpdateMemberRoleRequest,
+  UpdateAccountRequest,
   UpdateScheduleRequest,
   Workspace,
   WorkspaceDiff
@@ -114,10 +119,19 @@ function encode(segment: string): string {
 }
 
 export const api = {
+  login: (body: LoginRequest, signal?: AbortSignal) =>
+    request<CurrentUser>("/auth/login", { method: "POST", body, signal }),
+  logout: (signal?: AbortSignal) => request<void>("/auth/logout", { method: "POST", signal }),
+  changePassword: (body: ChangePasswordRequest, signal?: AbortSignal) =>
+    request<CurrentUser>("/auth/change-password", { method: "POST", body, signal }),
   getMeta: (signal?: AbortSignal) => request<Meta>("/meta", { signal }),
   listMembers: (signal?: AbortSignal) => request<Member[]>("/members", { signal }),
-  updateMemberRole: (memberId: string, body: UpdateMemberRoleRequest, signal?: AbortSignal) =>
-    request<Member>(`/members/${encode(memberId)}/role`, { method: "PATCH", body, signal }),
+  createAccount: (body: CreateAccountRequest, signal?: AbortSignal) =>
+    request<Member>("/members", { method: "POST", body, signal }),
+  updateAccount: (memberId: string, body: UpdateAccountRequest, signal?: AbortSignal) =>
+    request<Member>(`/members/${encode(memberId)}`, { method: "PATCH", body, signal }),
+  resetAccountPassword: (memberId: string, body: ResetPasswordRequest, signal?: AbortSignal) =>
+    request<Member>(`/members/${encode(memberId)}/password`, { method: "PUT", body, signal }),
   listTeams: (signal?: AbortSignal) => request<Team[]>("/teams", { signal }),
   listAgents: (signal?: AbortSignal) => request<Agent[]>("/agents", { signal }),
   createAgent: (body: CreateAgentRequest, signal?: AbortSignal) =>

@@ -30,6 +30,7 @@
 - Web Client 仅访问 `agentbox-server`。
 - `agentboxd` 主动连接 `agentbox-server`，Runtime 只在 Host 本地运行。
 - 禁止依赖 Tailscale Funnel。
+- Web Console 只支持 AgentBox 本地账号密码登录；Session 使用服务端持久化、HttpOnly、SameSite=Strict Cookie。Tailscale 只负责网络连通与设备级 ACL，不参与用户身份、角色或 Session 判定。
 
 ## 4. Runtime 范围
 
@@ -108,11 +109,11 @@
 ## 8. 多用户与权限
 
 - Web Console 始终在线并支持多人同时访问。
-- 第一个 Organization Member 是 Owner；后续未知用户默认 Viewer。
-- 支持 Owner/Admin/Operator/Viewer。
-- 支持 Workspace ACL 和 Box ACL，角色为 Owner/Operator/Viewer。
-- Viewer 默认只读；Operator 可以操作已分享 Box；Admin/Owner 管理 Organization 资源。
-- 所有 Prompt、Steer、Follow-up、Approval、Stop、ACL 和角色变更必须进入 Audit Log。
+- Organization 账号角色只保留 `admin` 与 `user`：Admin 管理账号、Agent Definition、Host/Workspace 和组织级资源；User 使用已授权的 Workspace、Box、Schedule、Approval 与 Terminal。
+- 首次启动自动创建默认管理员 `admin/admin123`，密码只保存为 bcrypt hash，并强制首次登录修改；后续启动不得覆盖管理员已修改的密码。
+- Admin 可以创建账号、切换 `admin/user` 角色、启用/禁用账号和重置临时密码；系统必须阻止管理员禁用或降级自己，并保证至少一个活跃 Admin。
+- 支持 Workspace ACL 和 Box ACL，资源角色继续使用 Owner/Operator/Viewer，与账号角色分层。
+- 所有登录、密码修改、账号创建/修改/禁用/重置、Prompt、Approval、Stop、ACL 和角色变更必须进入 Audit Log。
 
 ## 9. Box、Session 与交互入口
 
@@ -227,9 +228,10 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [ ] 手机通过 Tailnet 打开 Web Console 并操作远端 Host Agent。
 - [x] 页面断开后 Agent 继续执行。
 - [x] 重连后通过 Event Seq 完整回放。
-- [x] 两个用户同时查看同一 Box。
-- [x] Viewer 未授权操作返回 403。
-- [x] Operator 可操作显式分享的 Box。
+- [x] 默认 `admin/admin123` 可首次登录，并被强制修改临时密码。
+- [x] Admin 可创建、启用/禁用账号、切换 Admin/User 角色并重置临时密码。
+- [x] User 调用账号管理、Agent Definition 创建和 Workspace 注册 API 返回 403，但可使用被授权的 Box、Schedule、Approval 与 Terminal。
+- [x] 密码修改、密码重置和账号禁用会撤销旧 Session；禁止管理员锁定自己或移除最后一个活跃 Admin。
 - [x] 多用户消息显示正确作者。
 
 ### 13.4 Presentation Context

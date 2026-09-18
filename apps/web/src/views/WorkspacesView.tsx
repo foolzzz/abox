@@ -31,7 +31,7 @@ export function WorkspacesView() {
     <div className="page">
       <PageHeader eyebrow="Execution context" title="Workspaces" description="Host directories made available to agent boxes, with explicit owner, operator, and viewer access." actions={<><RefreshButton refreshing={resources.refreshing} onClick={resources.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/workspaces?create=1")}>New workspace</Button> : null}</>} />
       {resources.error ? <InlineAlert tone="warning">The list could not be refreshed. Showing the last loaded data.</InlineAlert> : null}
-      {!canCreate ? <p className="permission-caption">Your {currentUser?.role ?? "viewer"} role can use shared workspaces. An organization admin is required to register one.</p> : null}
+      {!canCreate ? <p className="permission-caption">Users can access shared workspaces; only administrators can register one.</p> : null}
       {data.workspaces.length ? (
         <section className="table-panel" aria-label="Registered workspaces">
           <div className="data-table data-table--workspaces" role="table">

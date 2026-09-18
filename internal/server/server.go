@@ -8,11 +8,12 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	hostv1 "agentbox/api"
+	authpkg "agentbox/internal/auth"
 	"agentbox/internal/domain"
-	"agentbox/internal/identity"
 	"agentbox/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -29,10 +30,10 @@ const (
 
 type Options struct {
 	Store                   store.Store
-	Identity                identity.Extractor
-	DevelopmentUser         domain.User
+	SystemUser              domain.User
 	EnrollmentToken         string
 	ServerVersion           string
+	PublicURL               string
 	StaticDir               string
 	Logger                  *slog.Logger
 	ApprovalPollInterval    time.Duration
@@ -55,13 +56,16 @@ type Options struct {
 type Server struct {
 	hostv1.UnimplementedHostServiceServer
 
-	store           store.Store
-	identity        identity.Extractor
-	developmentUser domain.User
-	enrollmentToken string
-	serverVersion   string
-	staticRoot      *os.Root
-	logger          *slog.Logger
+	store             store.Store
+	systemUser        domain.User
+	enrollmentToken   string
+	serverVersion     string
+	staticRoot        *os.Root
+	secureCookies     bool
+	dummyPasswordHash string
+	logger            *slog.Logger
+	loginMu           sync.Mutex
+	loginFailures     map[string]loginFailure
 
 	approvalPollInterval    time.Duration
 	hibernationPollInterval time.Duration
@@ -89,11 +93,8 @@ func New(options Options) (*Server, error) {
 	if options.Store == nil {
 		return nil, errors.New("server store is required")
 	}
-	if options.Identity == nil {
-		return nil, errors.New("server identity extractor is required")
-	}
-	if options.DevelopmentUser.ID == "" || options.DevelopmentUser.OrganizationID == "" {
-		return nil, errors.New("server development user is required")
+	if options.SystemUser.ID == "" || options.SystemUser.OrganizationID == "" {
+		return nil, errors.New("server system user is required")
 	}
 	if strings.TrimSpace(options.EnrollmentToken) == "" {
 		return nil, errors.New("server enrollment token is required")
@@ -165,18 +166,27 @@ func New(options Options) (*Server, error) {
 			return nil, fmt.Errorf("open static directory: %w", err)
 		}
 	}
+	dummyPasswordHash, err := authpkg.HashPassword("invalid-account-password")
+	if err != nil {
+		if staticRoot != nil {
+			_ = staticRoot.Close()
+		}
+		return nil, fmt.Errorf("prepare password verification: %w", err)
+	}
 
 	metricSet := newMetrics()
 	metricSet.codexEnabled = options.EnableCodex
 	metricSet.claudeEnabled = options.EnableClaude
 	server := &Server{
 		store:                   options.Store,
-		identity:                options.Identity,
-		developmentUser:         options.DevelopmentUser,
+		systemUser:              options.SystemUser,
 		enrollmentToken:         options.EnrollmentToken,
 		serverVersion:           options.ServerVersion,
 		staticRoot:              staticRoot,
+		secureCookies:           strings.HasPrefix(strings.ToLower(strings.TrimSpace(options.PublicURL)), "https://"),
+		dummyPasswordHash:       dummyPasswordHash,
 		logger:                  options.Logger,
+		loginFailures:           make(map[string]loginFailure),
 		approvalPollInterval:    options.ApprovalPollInterval,
 		hibernationPollInterval: options.HibernationPollInterval,
 		reaperBatchSize:         options.ReaperBatchSize,
@@ -232,65 +242,71 @@ func (s *Server) routes() http.Handler {
 	router.Get("/healthz", s.handleHealth)
 	router.Get("/readyz", s.handleReady)
 	router.Get("/metrics", s.handleMetrics)
-	router.With(s.authenticate, s.requireRole(roleViewer)).Get("/diagnostics", s.handleDiagnostics)
+	router.With(s.authenticate, s.requirePasswordChanged, s.requireRole(roleUser)).Get("/diagnostics", s.handleDiagnostics)
+	router.Post("/api/v1/auth/login", s.handleLogin)
 	router.Post("/api/v1/webhooks/schedules/{scheduleID}", s.handleScheduleWebhook)
+	router.With(s.authenticate).Get("/api/v1/meta", s.handleMeta)
+	router.With(s.authenticate).Post("/api/v1/auth/logout", s.handleLogout)
+	router.With(s.authenticate).Post("/api/v1/auth/change-password", s.handleChangePassword)
 
 	router.Route("/api/v1", func(api chi.Router) {
 		api.Use(s.authenticate)
-		api.Get("/meta", s.handleMeta)
+		api.Use(s.requirePasswordChanged)
 
-		api.With(s.requireRole(roleViewer)).Get("/members", s.handleListMembers)
-		api.With(s.requireRole(roleAdmin)).Patch("/members/{memberID}/role", s.handleUpdateMemberRole)
-		api.With(s.requireRole(roleViewer)).Get("/teams", s.handleListTeams)
+		api.With(s.requireRole(roleUser)).Get("/members", s.handleListMembers)
+		api.With(s.requireRole(roleAdmin)).Post("/members", s.handleCreateAccount)
+		api.With(s.requireRole(roleAdmin)).Patch("/members/{memberID}", s.handleUpdateAccount)
+		api.With(s.requireRole(roleAdmin)).Put("/members/{memberID}/password", s.handleResetAccountPassword)
+		api.With(s.requireRole(roleUser)).Get("/teams", s.handleListTeams)
 
-		api.With(s.requireRole(roleViewer)).Get("/agents", s.handleListAgents)
-		api.With(s.requireRole(roleViewer)).Get("/agents/{agentID}", s.handleGetAgent)
+		api.With(s.requireRole(roleUser)).Get("/agents", s.handleListAgents)
+		api.With(s.requireRole(roleUser)).Get("/agents/{agentID}", s.handleGetAgent)
 		api.With(s.requireRole(roleAdmin)).Post("/agents", s.handleCreateAgent)
 
-		api.With(s.requireRole(roleViewer)).Get("/hosts", s.handleListHosts)
-		api.With(s.requireRole(roleViewer)).Get("/hosts/{hostID}", s.handleGetHost)
+		api.With(s.requireRole(roleUser)).Get("/hosts", s.handleListHosts)
+		api.With(s.requireRole(roleUser)).Get("/hosts/{hostID}", s.handleGetHost)
 
-		api.With(s.requireRole(roleViewer)).Get("/workspaces", s.handleListWorkspaces)
-		api.With(s.requireRole(roleViewer)).Get("/workspaces/{workspaceID}", s.handleGetWorkspace)
+		api.With(s.requireRole(roleUser)).Get("/workspaces", s.handleListWorkspaces)
+		api.With(s.requireRole(roleUser)).Get("/workspaces/{workspaceID}", s.handleGetWorkspace)
 		api.With(s.requireRole(roleAdmin)).Post("/workspaces", s.handleCreateWorkspace)
-		api.With(s.requireRole(roleViewer)).Get("/workspaces/{workspaceID}/acl", s.handleListWorkspaceACL)
-		api.With(s.requireRole(roleViewer)).Put("/workspaces/{workspaceID}/acl", s.handleReplaceWorkspaceACL)
+		api.With(s.requireRole(roleUser)).Get("/workspaces/{workspaceID}/acl", s.handleListWorkspaceACL)
+		api.With(s.requireRole(roleUser)).Put("/workspaces/{workspaceID}/acl", s.handleReplaceWorkspaceACL)
 
-		api.With(s.requireRole(roleViewer)).Get("/boxes", s.handleListBoxes)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}", s.handleGetBox)
-		api.With(s.requireRole(roleViewer)).Post("/boxes", s.handleCreateBox)
-		api.With(s.requireRole(roleViewer)).Delete("/boxes/{boxID}", s.handleDeleteBox)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/acl", s.handleListBoxACL)
-		api.With(s.requireRole(roleViewer)).Put("/boxes/{boxID}/acl", s.handleReplaceBoxACL)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/messages", s.handleListMessages)
-		api.With(s.requireRole(roleViewer)).Post("/boxes/{boxID}/messages", s.handleSendMessage)
-		api.With(s.requireRole(roleViewer)).Delete("/boxes/{boxID}/messages/{messageID}", s.handleCancelQueuedMessage)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/events", s.handleEvents)
-		api.With(s.requireRole(roleViewer)).Post("/boxes/{boxID}/interrupt", s.handleInterrupt)
-		api.With(s.requireRole(roleViewer)).Post("/boxes/{boxID}/stop", s.handleStop)
-		api.With(s.requireRole(roleViewer)).Post("/boxes/{boxID}/resume", s.handleResume)
+		api.With(s.requireRole(roleUser)).Get("/boxes", s.handleListBoxes)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}", s.handleGetBox)
+		api.With(s.requireRole(roleUser)).Post("/boxes", s.handleCreateBox)
+		api.With(s.requireRole(roleUser)).Delete("/boxes/{boxID}", s.handleDeleteBox)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/acl", s.handleListBoxACL)
+		api.With(s.requireRole(roleUser)).Put("/boxes/{boxID}/acl", s.handleReplaceBoxACL)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/messages", s.handleListMessages)
+		api.With(s.requireRole(roleUser)).Post("/boxes/{boxID}/messages", s.handleSendMessage)
+		api.With(s.requireRole(roleUser)).Delete("/boxes/{boxID}/messages/{messageID}", s.handleCancelQueuedMessage)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/events", s.handleEvents)
+		api.With(s.requireRole(roleUser)).Post("/boxes/{boxID}/interrupt", s.handleInterrupt)
+		api.With(s.requireRole(roleUser)).Post("/boxes/{boxID}/stop", s.handleStop)
+		api.With(s.requireRole(roleUser)).Post("/boxes/{boxID}/resume", s.handleResume)
 
-		api.With(s.requireRole(roleViewer)).Get("/approvals", s.handleListApprovals)
-		api.With(s.requireRole(roleViewer)).Post("/approvals/{approvalID}/decision", s.handleDecideApproval)
+		api.With(s.requireRole(roleUser)).Get("/approvals", s.handleListApprovals)
+		api.With(s.requireRole(roleUser)).Post("/approvals/{approvalID}/decision", s.handleDecideApproval)
 
-		api.With(s.requireRole(roleViewer)).Get("/schedules", s.handleListSchedules)
-		api.With(s.requireRole(roleViewer)).Post("/schedules", s.handleCreateSchedule)
-		api.With(s.requireRole(roleViewer)).Patch("/schedules/{scheduleID}", s.handleUpdateSchedule)
-		api.With(s.requireRole(roleViewer)).Delete("/schedules/{scheduleID}", s.handleDeleteSchedule)
-		api.With(s.requireRole(roleViewer)).Get("/schedules/{scheduleID}/executions", s.handleListScheduleExecutions)
+		api.With(s.requireRole(roleUser)).Get("/schedules", s.handleListSchedules)
+		api.With(s.requireRole(roleUser)).Post("/schedules", s.handleCreateSchedule)
+		api.With(s.requireRole(roleUser)).Patch("/schedules/{scheduleID}", s.handleUpdateSchedule)
+		api.With(s.requireRole(roleUser)).Delete("/schedules/{scheduleID}", s.handleDeleteSchedule)
+		api.With(s.requireRole(roleUser)).Get("/schedules/{scheduleID}/executions", s.handleListScheduleExecutions)
 
-		api.With(s.requireRole(roleViewer)).Get("/notifications", s.handleListNotifications)
-		api.With(s.requireRole(roleViewer)).Post("/notifications/{notificationID}/read", s.handleMarkNotificationRead)
-		api.With(s.requireRole(roleViewer)).Post("/notifications/read-all", s.handleMarkAllNotificationsRead)
+		api.With(s.requireRole(roleUser)).Get("/notifications", s.handleListNotifications)
+		api.With(s.requireRole(roleUser)).Post("/notifications/{notificationID}/read", s.handleMarkNotificationRead)
+		api.With(s.requireRole(roleUser)).Post("/notifications/read-all", s.handleMarkAllNotificationsRead)
 
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/subagents", s.handleListSubagents)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/todos", s.handleListTodos)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/artifacts", s.handleListArtifacts)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/artifacts/{artifactID}/download", s.handleDownloadArtifact)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/diff", s.handleWorkspaceDiff)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/terminal", s.handleCommandTerminal)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/command-terminal", s.handleCommandTerminal)
-		api.With(s.requireRole(roleViewer)).Get("/boxes/{boxID}/agent-terminal", s.handleAgentTerminal)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/subagents", s.handleListSubagents)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/todos", s.handleListTodos)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/artifacts", s.handleListArtifacts)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/artifacts/{artifactID}/download", s.handleDownloadArtifact)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/diff", s.handleWorkspaceDiff)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/terminal", s.handleCommandTerminal)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/command-terminal", s.handleCommandTerminal)
+		api.With(s.requireRole(roleUser)).Get("/boxes/{boxID}/agent-terminal", s.handleAgentTerminal)
 	})
 
 	if s.staticRoot != nil {
@@ -327,7 +343,7 @@ func (s *Server) handleHealth(writer http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleReady(writer http.ResponseWriter, request *http.Request) {
 	ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
 	defer cancel()
-	if _, err := s.store.ListAgents(ctx, s.developmentUser); err != nil {
+	if _, err := s.store.ListAgents(ctx, s.systemUser); err != nil {
 		s.metrics.recordFailure("database", "database readiness check failed")
 		writeProblem(writer, http.StatusServiceUnavailable, "not_ready", "database is unavailable")
 		return
@@ -337,17 +353,20 @@ func (s *Server) handleReady(writer http.ResponseWriter, request *http.Request) 
 
 func (s *Server) handleMeta(writer http.ResponseWriter, request *http.Request) {
 	user, _ := requestUser(request)
+	writer.Header().Set("Cache-Control", "no-store")
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"serverVersion":    s.serverVersion,
 		"apiVersion":       defaultAPIVersion,
 		"minDaemonVersion": "0.1.0",
 		"enabledRuntimes":  s.enabledRuntimes(),
 		"runtimeModels":    s.runtimeModels,
-		"currentUser": map[string]string{
-			"id":          user.ID,
-			"login":       user.Login,
-			"displayName": user.DisplayName,
-			"role":        user.Role,
+		"currentUser": map[string]any{
+			"id":                 user.ID,
+			"login":              user.Login,
+			"displayName":        user.DisplayName,
+			"role":               user.Role,
+			"status":             user.Status,
+			"mustChangePassword": user.MustChangePassword,
 		},
 	})
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api } from "../api/client";
-import type { OrganizationRole } from "../api/types";
+import { api, ApiError } from "../api/client";
+import type { CurrentUser, OrganizationRole } from "../api/types";
 import { useResource } from "../hooks/useResource";
 import { AccessProvider, roleAtLeast } from "../lib/access";
 import { initials } from "../lib/format";
@@ -8,17 +8,18 @@ import { useI18n } from "../lib/i18n";
 import { Link, useLocation } from "../lib/router";
 import { Icon, type IconName } from "./Icon";
 import { cx } from "./ui";
+import { LoginView, PasswordChangeView } from "../views/AuthView";
 
 const NAV_ITEMS: Array<{ to: string; labelKey: string; icon: IconName; minimumRole?: OrganizationRole }> = [
   { to: "/", labelKey: "nav.overview", icon: "dashboard" },
   { to: "/agents", labelKey: "nav.agents", icon: "agent" },
   { to: "/boxes", labelKey: "nav.boxes", icon: "box" },
   { to: "/schedules", labelKey: "nav.schedules", icon: "schedule" },
-  { to: "/approvals", labelKey: "nav.approvals", icon: "approval", minimumRole: "operator" },
+  { to: "/approvals", labelKey: "nav.approvals", icon: "approval", minimumRole: "user" },
   { to: "/notifications", labelKey: "nav.notifications", icon: "notification" },
   { to: "/hosts", labelKey: "nav.hosts", icon: "host" },
   { to: "/workspaces", labelKey: "nav.workspaces", icon: "workspace" },
-  { to: "/members", labelKey: "nav.organization", icon: "members" }
+  { to: "/members", labelKey: "nav.organization", icon: "members", minimumRole: "admin" }
 ];
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -26,18 +27,20 @@ export function Shell({ children }: { children: ReactNode }) {
   const { locale, setLocale, t } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
   const meta = useResource((signal) => api.getMeta(signal), []);
-  const canReviewApprovals = roleAtLeast(meta.data?.currentUser.role, "operator");
-  const approvals = useResource((signal) => canReviewApprovals ? api.listApprovals(signal) : Promise.resolve([]), [canReviewApprovals]);
-  const notifications = useResource((signal) => api.listNotifications(signal), []);
+  const authenticated = Boolean(meta.data);
+  const canReviewApprovals = roleAtLeast(meta.data?.currentUser.role, "user");
+  const approvals = useResource((signal) => authenticated && canReviewApprovals ? api.listApprovals(signal) : Promise.resolve([]), [authenticated, canReviewApprovals]);
+  const notifications = useResource((signal) => authenticated ? api.listNotifications(signal) : Promise.resolve([]), [authenticated]);
 
   useEffect(() => setMobileOpen(false), [location.pathname]);
   useEffect(() => {
     const interval = window.setInterval(() => {
+      if (!authenticated) return;
       notifications.reload();
       if (canReviewApprovals) approvals.reload();
     }, 30_000);
     return () => window.clearInterval(interval);
-  }, [approvals.reload, canReviewApprovals, notifications.reload]);
+  }, [approvals.reload, authenticated, canReviewApprovals, notifications.reload]);
   useEffect(() => {
     const refreshNotifications = () => notifications.reload();
     const refreshApprovals = () => approvals.reload();
@@ -59,6 +62,25 @@ export function Shell({ children }: { children: ReactNode }) {
 
   const visibleNavItems = NAV_ITEMS.filter((item) => !item.minimumRole || roleAtLeast(meta.data?.currentUser.role, item.minimumRole));
   const currentUser = meta.data?.currentUser;
+
+  const logout = async () => {
+    try {
+      await api.logout();
+    } finally {
+      meta.setData(undefined);
+      meta.reload();
+    }
+  };
+
+  if (meta.loading && !meta.data) {
+    return <div className="auth-screen"><div className="auth-card auth-card--loading"><span className="spinner" /><p>Checking account session…</p></div></div>;
+  }
+  if (meta.error instanceof ApiError && meta.error.status === 401) {
+    return <LoginView onAuthenticated={() => meta.reload()} />;
+  }
+  if (currentUser?.mustChangePassword) {
+    return <PasswordChangeView user={currentUser} onChanged={(user: CurrentUser) => meta.setData((current) => current ? { ...current, currentUser: user } : current)} onLogout={() => void logout()} />;
+  }
 
   return (
     <AccessProvider meta={meta.data} loading={meta.loading} error={meta.error}>
@@ -83,7 +105,7 @@ export function Shell({ children }: { children: ReactNode }) {
             })}
           </nav>
           <div className="sidebar__footer">
-            {currentUser ? <Link className="sidebar-user" to="/members"><span className="member-avatar member-avatar--small">{initials(currentUser.displayName || currentUser.login)}</span><span><strong>{currentUser.displayName || currentUser.login}</strong><small>{currentUser.role} · {currentUser.login}</small></span></Link> : null}
+            {currentUser ? <div className="sidebar-user-row">{roleAtLeast(currentUser.role, "admin") ? <Link className="sidebar-user" to="/members"><span className="member-avatar member-avatar--small">{initials(currentUser.displayName || currentUser.login)}</span><span><strong>{currentUser.displayName || currentUser.login}</strong><small>{currentUser.role} · {currentUser.login}</small></span></Link> : <div className="sidebar-user"><span className="member-avatar member-avatar--small">{initials(currentUser.displayName || currentUser.login)}</span><span><strong>{currentUser.displayName || currentUser.login}</strong><small>{currentUser.role} · {currentUser.login}</small></span></div>}<button className="icon-button" type="button" onClick={() => void logout()} aria-label="Sign out" title="Sign out"><Icon name="close" /></button></div> : null}
             <label className="language-switch"><span>Language / 语言</span><select value={locale} onChange={(event) => setLocale(event.target.value as "zh-CN" | "en")}><option value="zh-CN">{t("language.zh")}</option><option value="en">{t("language.en")}</option></select></label>
             <div className={cx("server-state", meta.error ? "server-state--error" : "server-state--online")}>
               <span aria-hidden="true" />

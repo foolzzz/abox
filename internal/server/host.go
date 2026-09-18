@@ -284,7 +284,7 @@ func (s *Server) authenticateHost(ctx context.Context, hello *hostv1.HostHello) 
 		}
 		host = domain.Host{
 			ID:             hostID,
-			OrganizationID: s.developmentUser.OrganizationID,
+			OrganizationID: s.systemUser.OrganizationID,
 			Name:           hostName,
 			Slug:           defaultHostName(hostID),
 			Status:         domain.HostOnline,
@@ -294,7 +294,7 @@ func (s *Server) authenticateHost(ctx context.Context, hello *hostv1.HostHello) 
 		if hostID == "" || !s.validHostCredential(hostID, credential) {
 			return domain.Host{}, "", status.Error(codes.Unauthenticated, "invalid host credential")
 		}
-		storedHost, err := s.store.GetHostForOrganization(ctx, s.developmentUser.OrganizationID, hostID)
+		storedHost, err := s.store.GetHostForOrganization(ctx, s.systemUser.OrganizationID, hostID)
 		if err != nil {
 			return domain.Host{}, "", storeGRPCStatus("load enrolled host", err)
 		}

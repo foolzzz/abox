@@ -28,7 +28,7 @@ const STATUS_ZH: Record<string, string> = {
   denied: "已拒绝", completed: "已完成", succeeded: "成功", failed: "失败", error: "错误",
   offline: "离线", available: "可用", unavailable: "不可用", paused: "已暂停", active: "已启用",
   hibernating: "休眠中", hibernated: "已休眠", cancelled: "已取消", expired: "已过期",
-  read_only: "只读", operator: "操作者", admin: "管理员", owner: "所有者", viewer: "查看者",
+  read_only: "只读", operator: "操作者", admin: "管理员", user: "普通用户", owner: "所有者", viewer: "查看者", disabled: "已禁用",
   validation: "等待验证", connecting: "连接中", connected: "已连接", closed: "已关闭"
 };
 
@@ -41,7 +41,7 @@ export function StatusChip({ status, compact = false }: { status: string; compac
       ? "active"
       : ["waiting_approval", "pending", "enrolling", "draining", "retrying", "read_only", "paused", "hibernating", "hibernated", "skipped", "parked"].includes(status)
         ? "warning"
-        : ["error", "failed", "offline", "revoked", "denied", "critical", "closed", "unavailable", "cancelled", "expired", "deleted", "blocked", "abandoned"].includes(status)
+        : ["error", "failed", "offline", "revoked", "denied", "critical", "closed", "unavailable", "cancelled", "expired", "deleted", "disabled", "blocked", "abandoned"].includes(status)
           ? "negative"
           : "neutral";
   return (

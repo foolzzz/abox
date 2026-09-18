@@ -486,7 +486,7 @@ func (s *Store) ListApprovals(ctx context.Context, user domain.User) ([]domain.A
         JOIN boxes b ON b.id = a.box_id AND b.organization_id = a.organization_id
         WHERE a.organization_id = $1 AND a.status = 'pending'
           AND (
-              $3 IN ('owner','admin') OR b.owner_user_id = $2
+              $3 = 'admin' OR b.owner_user_id = $2
               OR EXISTS (
                   SELECT 1 FROM box_acl ba
                   WHERE ba.box_id = b.id AND ba.user_id = $2

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"agentbox/internal/auth"
 	"agentbox/internal/config"
-	"agentbox/internal/identity"
 	"agentbox/internal/server"
 	storepostgres "agentbox/internal/store/postgres"
 	"google.golang.org/grpc"
@@ -48,40 +47,30 @@ func run(logger *slog.Logger, configPath string) error {
 	if err := dataStore.Migrate(rootContext); err != nil {
 		return err
 	}
-	developmentUser, err := dataStore.EnsureDevelopmentTenant(rootContext, configuration.DevelopmentUser)
+	defaultAdminHash, err := auth.HashPassword(auth.DefaultAdminPassword)
 	if err != nil {
 		return err
 	}
-
-	var sourceTrust identity.SourceTrust = identity.LoopbackTrust{}
-	if len(configuration.TrustedProxyCIDRs) > 0 {
-		sourceTrust, err = identity.NewCIDRTrust(configuration.TrustedProxyCIDRs...)
-		if err != nil {
-			return fmt.Errorf("configure trusted proxy CIDRs: %w", err)
-		}
-	}
-	serveIdentity, err := identity.NewServeHeaderExtractor(sourceTrust)
+	systemUser, bootstrapCreated, err := dataStore.EnsureBootstrapAdmin(
+		rootContext,
+		auth.DefaultAdminUsername,
+		"Administrator",
+		defaultAdminHash,
+	)
 	if err != nil {
 		return err
 	}
-	developmentIdentity, err := identity.NewDevelopmentExtractor(configuration.EnableDevelopmentAuth, identity.Principal{
-		LoginName:   configuration.DevelopmentUser,
-		DisplayName: configuration.DevelopmentUser,
-	}, sourceTrust)
-	if err != nil {
-		return err
-	}
-	identityExtractor, err := identity.NewFallbackExtractor(serveIdentity, developmentIdentity)
-	if err != nil {
-		return err
+	if bootstrapCreated {
+		logger.Warn("default administrator created; change the password immediately",
+			"component", "agentbox-server", "username", auth.DefaultAdminUsername)
 	}
 
 	controlPlane, err := server.New(server.Options{
 		Store:                   dataStore,
-		Identity:                identityExtractor,
-		DevelopmentUser:         developmentUser,
+		SystemUser:              systemUser,
 		EnrollmentToken:         configuration.EnrollmentToken,
 		ServerVersion:           configuration.Version,
+		PublicURL:               configuration.PublicURL,
 		StaticDir:               configuration.WebDir,
 		Logger:                  logger,
 		ApprovalPollInterval:    configuration.ApprovalPollInterval,
