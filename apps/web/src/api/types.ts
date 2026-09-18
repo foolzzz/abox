@@ -245,7 +245,6 @@ export interface Notification {
   boxId?: string | null;
   runId?: string | null;
   scheduleId?: string | null;
-  approvalId?: string | null;
   createdAt: string;
   readAt?: string | null;
 }
