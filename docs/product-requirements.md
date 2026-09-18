@@ -202,7 +202,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 
 - [x] Control Plane Docker 镜像采用多阶段构建和 non-root distroless Runtime。
 - [x] Docker Compose 能启动 PostgreSQL 与 Server/Web Control Plane，原生 daemon 可通过映射的 gRPC 端口注册。
-- [x] GitHub PR 与 `main` merge 后运行 Security、CodeQL、Secret Scan、Dependency Review、Trivy 和 Go CI/golangci-lint。
+- [x] 仅在 merge 到 `main` 后运行 Security、CodeQL、Secret Scan、Trivy 和 Go CI/golangci-lint；不阻塞 PR 开发流程。
 - [x] Web、Server、daemon 独立构建。
 - [x] Server 可嵌入 Web 静态资源单点部署。
 - [x] Server 配置完全来自配置文件。
