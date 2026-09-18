@@ -1,6 +1,6 @@
 export type RuntimeType = "omp" | "codex" | "claude" | "acp";
 export type HostStatus = "enrolling" | "online" | "draining" | "offline" | "revoked";
-export type OrganizationRole = "owner" | "admin" | "operator" | "viewer";
+export type OrganizationRole = "admin" | "user";
 export type ResourceRole = "owner" | "operator" | "viewer";
 export type WorkspaceStatus = "provisioning" | "ready" | "error" | "archived";
 export type BoxStatus =
@@ -34,6 +34,8 @@ export interface CurrentUser {
   login: string;
   displayName: string;
   role: OrganizationRole;
+  status: "active" | "disabled";
+  mustChangePassword: boolean;
 }
 
 export interface Meta {
@@ -51,8 +53,17 @@ export interface Member {
   login: string;
   displayName: string;
   role: OrganizationRole;
+  status: "active" | "disabled";
+  hasPassword: boolean;
+  mustChangePassword: boolean;
   createdAt: string;
 }
+
+export interface LoginRequest { username: string; password: string; }
+export interface ChangePasswordRequest { currentPassword: string; newPassword: string; }
+export interface CreateAccountRequest { username: string; displayName: string; role: OrganizationRole; password: string; }
+export interface UpdateAccountRequest { displayName?: string; role?: OrganizationRole; status?: "active" | "disabled"; }
+export interface ResetPasswordRequest { password: string; }
 
 export interface Team {
   id: string;
@@ -85,9 +96,6 @@ export interface ReplaceAccessControlRequest {
   entries: AccessControlInput[];
 }
 
-export interface UpdateMemberRoleRequest {
-  role: OrganizationRole;
-}
 
 export interface Agent {
   id: string;

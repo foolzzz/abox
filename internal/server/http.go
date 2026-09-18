@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"agentbox/internal/domain"
-	"agentbox/internal/identity"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -23,46 +21,19 @@ import (
 type roleLevel int
 
 const (
-	roleViewer roleLevel = iota + 1
-	roleOperator
+	roleUser roleLevel = iota + 1
 	roleAdmin
-	roleOwner
 )
 
 func levelForRole(role string) roleLevel {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "owner":
-		return roleOwner
 	case "admin":
 		return roleAdmin
-	case "operator":
-		return roleOperator
-	case "viewer":
-		return roleViewer
+	case "user":
+		return roleUser
 	default:
 		return 0
 	}
-}
-
-func (s *Server) authenticate(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		principal, err := s.identity.Extract(request)
-		if err != nil {
-			statusCode := http.StatusUnauthorized
-			if errors.Is(err, identity.ErrUntrustedSource) {
-				statusCode = http.StatusForbidden
-			}
-			writeProblem(writer, statusCode, "unauthenticated", "a trusted Tailscale or development identity is required")
-			return
-		}
-		user, err := s.store.EnsureDevelopmentTenant(request.Context(), principal.LoginName)
-		if err != nil {
-			s.logError("resolve identity", err, "login", principal.LoginName)
-			writeProblem(writer, http.StatusServiceUnavailable, "identity_unavailable", "identity could not be resolved")
-			return
-		}
-		next.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), userContextKey{}, user)))
-	})
 }
 
 func (s *Server) requireRole(minimum roleLevel) func(http.Handler) http.Handler {
@@ -90,27 +61,6 @@ func (s *Server) handleListMembers(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(writer, http.StatusOK, members)
-}
-
-func (s *Server) handleUpdateMemberRole(writer http.ResponseWriter, request *http.Request) {
-	var body struct {
-		Role string `json:"role"`
-	}
-	if err := decodeJSON(request, &body); err != nil {
-		writeProblem(writer, http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
-	if levelForRole(body.Role) == 0 {
-		writeProblem(writer, http.StatusBadRequest, "invalid_request", "role must be owner, admin, operator, or viewer")
-		return
-	}
-	user, _ := requestUser(request)
-	member, err := s.store.UpdateMemberRole(request.Context(), user, chi.URLParam(request, "memberID"), body.Role)
-	if err != nil {
-		s.writeStoreError(writer, "update member role", err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, member)
 }
 
 func (s *Server) handleListTeams(writer http.ResponseWriter, request *http.Request) {

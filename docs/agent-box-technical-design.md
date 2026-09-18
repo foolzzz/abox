@@ -458,8 +458,8 @@ agentbox-server
 
 ### 6.2 职责
 
-- Tailscale 身份映射与应用用户管理。
-- RBAC 和 Box ACL。
+- 本地账号密码、服务端 Session 与账号生命周期管理。
+- Admin/User RBAC 和 Box/Workspace ACL。
 - Agent Definition 版本管理。
 - Host 注册、心跳、能力和 Drain。
 - Workspace 元数据与授权。
@@ -474,34 +474,26 @@ agentbox-server
 
 ### 6.3 身份认证
 
-MVP 使用 Tailscale 身份作为外部认证，应用内部维护 User 和 Team。
+Control Plane 的 Web 身份认证完全由 AgentBox 本地账号负责：
 
-推荐两种接入方式，按部署环境选择：
+1. 用户名全局唯一，密码使用 bcrypt cost 12 保存。
+2. 成功登录后签发随机 256-bit Session Token，数据库仅保存 SHA-256 hash。
+3. Session 使用服务端持久化的 `HttpOnly + SameSite=Strict` Cookie；Public URL 为 HTTPS 时设置 `Secure`。
+4. Session 默认有效期 7 天，账号禁用、密码修改和管理员密码重置立即撤销相关 Session。
+5. 登录按来源 IP + username 组合限速：15 分钟窗口内最多 5 次失败，达到阈值返回 `429` 与 `Retry-After`。
 
-1. Tailscale Serve 注入身份 Header，反向代理必须覆盖并删除客户端同名 Header。
-2. Server 通过 tailscaled LocalAPI WhoIs 根据连接源 IP 获取 Tailnet 身份。
+首次空库启动创建 `admin/admin123`，只写入 bcrypt hash，并标记 `must_change_password=true`。首次登录只能访问 Meta、Logout 和 Change Password；修改后才可进入业务 API。后续启动不得覆盖已存在 Admin 的密码。
 
-无论哪种方式，认证结果标准化为：
-
-```go
-type Principal struct {
-    UserID       string
-    LoginName    string
-    TailnetNode  string
-    Organization string
-}
-```
-
-不允许直接信任浏览器提交的 email、role 或 host identity。
+Tailscale 只承担 Client、Control Plane 与 Host 之间的网络连通、设备认证和网络 ACL，不映射 AgentBox 用户，不注入角色，也不参与 Web Session 判定。
 
 ### 6.4 RBAC
 
-组织角色：
+组织账号角色：
 
-- Owner：组织、用户、Host、Secret、所有资源。
-- Admin：Agent、Host、Workspace、成员管理。
-- Operator：创建 Box、发送 Prompt、审批、停止 Runtime。
-- Viewer：只读消息、事件、Diff、Artifact。
+- Admin：账号管理、Agent Definition、Host、Workspace、组织级配置以及所有资源操作。
+- User：使用已授权或自己拥有的 Workspace、Box、Schedule、Approval、Terminal 和 Artifact。
+
+系统禁止 Admin 修改自己的角色或禁用自己，并在事务内保证至少一个活跃 Admin。
 
 资源级 ACL：
 
@@ -692,7 +684,7 @@ limits:
 ### 7.3 Enrollment
 
 1. Admin 在 Control Plane 创建一次性 Enrollment Token。
-2. daemon 使用 Token 和 Tailscale 身份注册。
+2. daemon 通过受控网络连接 Server，并使用 Token 注册；Tailscale 只提供传输网络，不提供应用身份。
 3. Server 创建 Host 记录并签发 Host Credential。
 4. daemon 将 Credential 存储在系统 Keychain 或权限为 `0600` 的文件。
 5. Token 立即失效。
@@ -1575,7 +1567,7 @@ Web/API 创建 Box
 | Session 与 Agent Definition 漂移 | Agent 行为不可复现 | Box 固定 Agent Version/System Prompt Snapshot |
 | 长任务占满 Host | 容量耗尽 | Host Capacity、Run Timeout、Drain |
 | Secret 出现在事件和日志 | 凭证泄露 | 注入最小化、统一脱敏、禁止前端读回 |
-| Tailscale 用户等于应用管理员 | 越权 | 应用层 User/Team/RBAC，不只依赖网络身份 |
+| 网络可达被误当成应用权限 | 越权 | Web 账号与 Admin/User RBAC 独立校验，Tailscale ACL 只限制网络可达性 |
 
 ## 20. 产品决策默认值
 

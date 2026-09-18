@@ -93,8 +93,8 @@ func (s *Store) UpsertHost(ctx context.Context, host domain.Host, daemonInstance
 		err := tx.QueryRow(ctx, `
             SELECT user_id
             FROM organization_members
-            WHERE organization_id = $1 AND status = 'active' AND role IN ('owner', 'admin')
-            ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, joined_at
+            WHERE organization_id = $1 AND status = 'active' AND role = 'admin'
+            ORDER BY joined_at
             LIMIT 1`, host.OrganizationID).Scan(&creatorID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: host organization has no active administrator", storepkg.ErrForbidden)
@@ -268,7 +268,7 @@ func (s *Store) ListWorkspaces(ctx context.Context, user domain.User) ([]domain.
 	rows, err := s.pool.Query(ctx, workspaceSelect+`
         WHERE w.organization_id = $1 AND w.status <> 'archived'
           AND (
-              $3 IN ('owner', 'admin')
+              $3 = 'admin'
               OR EXISTS (
                   SELECT 1 FROM workspace_acl wa
                   WHERE wa.workspace_id = w.id AND wa.user_id = $2
@@ -313,7 +313,7 @@ func (s *Store) CreateWorkspace(ctx context.Context, user domain.User, input dom
 	var result domain.Workspace
 	var command *domain.HostCommand
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
-		if _, err := requireRole(ctx, tx, user, "owner", "admin"); err != nil {
+		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
 			return err
 		}
 		var hostStatus domain.HostStatus
@@ -485,7 +485,7 @@ func canOperateWorkspace(ctx context.Context, q querier, user domain.User, works
 	if err != nil {
 		return false, err
 	}
-	if role == "owner" || role == "admin" {
+	if role == "admin" {
 		return true, nil
 	}
 	var allowed bool

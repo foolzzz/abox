@@ -3,8 +3,6 @@
   "httpAddr": "127.0.0.1:8080",
   "grpcAddr": "127.0.0.1:9443",
   "publicUrl": "http://127.0.0.1:8080",
-  "developmentUser": "owner@example.com",
-  "enableDevelopmentAuth": false,
   "enrollmentToken": "replace-me",
   "webDir": "~/.agentbox/web",
   "version": "dev",

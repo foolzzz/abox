@@ -11,11 +11,11 @@ import { Link } from "../lib/router";
 
 export function ApprovalsView() {
   const { currentUser, loading: accessLoading } = useAccess();
-  const canReview = roleAtLeast(currentUser?.role, "operator");
+  const canReview = roleAtLeast(currentUser?.role, "user");
   const resource = useResource((signal) => canReview ? api.listApprovals(signal) : Promise.resolve([]), [canReview]);
 
   if (accessLoading || resource.loading) return <LoadingState label="Loading approval queue" />;
-  if (!canReview) return <div className="page"><PageHeader eyebrow="Human in the loop" title="Approvals" description="Sensitive tool requests require an operator decision." /><EmptyState icon="approval" title="Operator access required" description={`Your ${currentUser?.role ?? "viewer"} role is read-only. An operator, admin, or owner can review approvals.`} /></div>;
+  if (!canReview) return <div className="page"><PageHeader eyebrow="Human in the loop" title="Approvals" description="Sensitive tool requests require an account decision." /><EmptyState icon="approval" title="User access required" description="Sign in with an active AgentBox account to review approvals." /></div>;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
 
   const approvals = resource.data ?? [];

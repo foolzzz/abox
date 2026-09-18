@@ -26,7 +26,7 @@ func (s *Store) ListBoxes(ctx context.Context, user domain.User) ([]domain.Box, 
 	rows, err := s.pool.Query(ctx, boxSelect+`
         WHERE b.organization_id = $1 AND b.status <> 'terminated'
           AND (
-              $3 IN ('owner', 'admin')
+              $3 = 'admin'
               OR b.owner_user_id = $2
               OR b.visibility = 'org'
               OR EXISTS (
@@ -184,7 +184,7 @@ func (s *Store) DeleteBox(ctx context.Context, user domain.User, boxID string) (
 		if err != nil {
 			return mapError("lock box for deletion", err)
 		}
-		if role != "owner" && role != "admin" && ownerUserID != user.ID {
+		if role != "admin" && ownerUserID != user.ID {
 			return fmt.Errorf("%w: only the box owner or an organization admin can delete this session", storepkg.ErrForbidden)
 		}
 		if status == string(domain.BoxTerminated) {
@@ -316,7 +316,7 @@ func canReadBox(ctx context.Context, q querier, user domain.User, boxID string) 
             FROM boxes b
             WHERE b.organization_id = $1 AND b.id = $2 AND b.status <> 'terminated'
               AND (
-                  $4 IN ('owner', 'admin')
+                  $4 = 'admin'
                   OR b.owner_user_id = $3
                   OR b.visibility = 'org'
                   OR EXISTS (
@@ -348,7 +348,7 @@ func canOperateBox(ctx context.Context, q querier, user domain.User, boxID strin
             FROM boxes b
             WHERE b.organization_id = $1 AND b.id = $2 AND b.status <> 'terminated'
               AND (
-                  $4 IN ('owner', 'admin')
+                  $4 = 'admin'
                   OR b.owner_user_id = $3
                   OR EXISTS (
                       SELECT 1 FROM box_acl ba

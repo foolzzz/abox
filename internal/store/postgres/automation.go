@@ -37,7 +37,7 @@ func (s *Store) ListSchedules(ctx context.Context, user domain.User) ([]domain.S
 	rows, err := s.pool.Query(ctx, scheduleSelect+`
         WHERE s.organization_id = $1 AND s.status <> 'deleted'
           AND (
-              $3 IN ('owner','admin')
+              $3 = 'admin'
               OR EXISTS (
                   SELECT 1 FROM workspace_acl wa
                   WHERE wa.workspace_id = s.workspace_id AND wa.user_id = $2

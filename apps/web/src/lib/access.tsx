@@ -2,10 +2,8 @@ import { createContext, useContext, type ReactNode } from "react";
 import type { CurrentUser, Meta, OrganizationRole } from "../api/types";
 
 const ROLE_LEVEL: Record<OrganizationRole, number> = {
-  viewer: 1,
-  operator: 2,
-  admin: 3,
-  owner: 4
+  user: 1,
+  admin: 2
 };
 
 interface AccessContextValue {

@@ -32,7 +32,7 @@ export function BoxesView() {
   }, []);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
-  const canCreate = roleAtLeast(currentUser?.role, "operator");
+  const canCreate = roleAtLeast(currentUser?.role, "user");
   const createOpen = canCreate && new URLSearchParams(location.search).get("create") === "1";
 
   if (resource.loading) return <LoadingState label={t("boxes.loading")} />;
@@ -54,7 +54,7 @@ export function BoxesView() {
     <div className="page">
       <PageHeader eyebrow={t("boxes.eyebrow")} title={t("boxes.title")} description={t("boxes.description")} actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/boxes?create=1")}>{t("boxes.new")}</Button> : null}</>} />
       {resource.error ? <InlineAlert tone="warning">Box state could not be refreshed. Showing the last loaded snapshot.</InlineAlert> : null}
-      {!canCreate ? <p className="permission-caption">Your {currentUser?.role ?? "viewer"} role can open shared boxes in read-only mode. Operator access is required to create one.</p> : null}
+      {!canCreate ? <p className="permission-caption">An active user or administrator account is required to create a box.</p> : null}
       {data.boxes.length ? (
         <>
           <div className="list-toolbar">

@@ -16,9 +16,6 @@ type Config struct {
 	HTTPAddr                string
 	GRPCAddr                string
 	PublicURL               string
-	DevelopmentUser         string
-	EnableDevelopmentAuth   bool
-	TrustedProxyCIDRs       []string
 	EnrollmentToken         string
 	WebDir                  string
 	Version                 string
@@ -40,9 +37,6 @@ type fileConfig struct {
 	HTTPAddr                string              `json:"httpAddr"`
 	GRPCAddr                string              `json:"grpcAddr"`
 	PublicURL               string              `json:"publicUrl"`
-	DevelopmentUser         string              `json:"developmentUser"`
-	TrustedProxyCIDRs       []string            `json:"trustedProxyCIDRs"`
-	EnableDevelopmentAuth   bool                `json:"enableDevelopmentAuth"`
 	EnrollmentToken         string              `json:"enrollmentToken"`
 	WebDir                  string              `json:"webDir"`
 	Version                 string              `json:"version"`
@@ -150,12 +144,10 @@ func Load(path string) (Config, error) {
 	}
 	result := Config{
 		DatabaseURL: raw.DatabaseURL, HTTPAddr: raw.HTTPAddr, GRPCAddr: raw.GRPCAddr,
-		PublicURL: raw.PublicURL, DevelopmentUser: raw.DevelopmentUser,
-		EnableDevelopmentAuth: raw.EnableDevelopmentAuth,
-		EnrollmentToken:       raw.EnrollmentToken, WebDir: webDir, Version: raw.Version,
+		PublicURL: raw.PublicURL, EnrollmentToken: raw.EnrollmentToken,
+		WebDir: webDir, Version: raw.Version,
 		ApprovalPollInterval: approval, HibernationPollInterval: hibernation,
 		SchedulePollInterval: schedule, RetentionPollInterval: retentionPoll,
-		TrustedProxyCIDRs:    append([]string(nil), raw.TrustedProxyCIDRs...),
 		OperationalRetention: operationalRetention, AuditRetention: auditRetention,
 		ReaperBatchSize: raw.ReaperBatchSize, WebhookSecret: raw.WebhookSecret,
 		EnableCodex: enableCodex, EnableClaude: raw.EnableClaude,
@@ -170,8 +162,7 @@ func Load(path string) (Config, error) {
 func (c Config) Validate() error {
 	for name, value := range map[string]string{
 		"databaseUrl": c.DatabaseURL, "httpAddr": c.HTTPAddr, "grpcAddr": c.GRPCAddr,
-		"developmentUser": c.DevelopmentUser, "enrollmentToken": c.EnrollmentToken,
-		"version": c.Version,
+		"enrollmentToken": c.EnrollmentToken, "version": c.Version,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("%s is required", name)

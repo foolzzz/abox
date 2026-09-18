@@ -19,7 +19,7 @@ interface ScheduleData {
 export function SchedulesView() {
   const { currentUser, meta } = useAccess();
   const { notify } = useToast();
-  const canManage = roleAtLeast(currentUser?.role, "operator");
+  const canManage = roleAtLeast(currentUser?.role, "user");
   const resource = useResource<ScheduleData>(async (signal) => {
     const [schedules, agents, hosts, workspaces] = await Promise.all([
       api.listSchedules(signal),
@@ -73,7 +73,7 @@ export function SchedulesView() {
         actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} />{canManage ? <Button variant="primary" icon="plus" onClick={() => setEditor("new")}>New schedule</Button> : null}</>}
       />
       {resource.error ? <InlineAlert tone="warning">Schedules could not be refreshed. Showing the last loaded state.</InlineAlert> : null}
-      {!canManage ? <p className="permission-caption">Your {currentUser?.role ?? "viewer"} role can inspect automation history. Operator access is required to create or change schedules.</p> : null}
+      {!canManage ? <p className="permission-caption">An active user or administrator account is required to manage schedules.</p> : null}
       {data.schedules.some((schedule) => schedule.status !== "deleted") ? (
         <>
           <div className="list-toolbar schedule-toolbar">
