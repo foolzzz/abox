@@ -69,7 +69,7 @@ export function NotificationsView() {
 }
 
 function NotificationRow({ item, busy, onRead }: { item: Notification; busy: boolean; onRead: () => void }) {
-  const href = item.approvalId ? "/approvals" : item.boxId ? `/boxes/${item.boxId}` : item.scheduleId ? "/schedules" : undefined;
+  const href = item.approvalId ? "/approvals" : item.boxId ? `/boxes/${item.boxId}/agent-terminal` : item.scheduleId ? "/schedules" : undefined;
   const details = <><span><strong>{item.title}</strong>{item.status === "unread" ? <i aria-label="Unread" /> : null}</span><p>{item.body}</p><small><span>{humanize(item.type)}</span><time dateTime={item.createdAt} title={formatDate(item.createdAt)}>{relativeTime(item.createdAt)}</time>{item.readAt ? <span>Read {relativeTime(item.readAt)}</span> : null}</small></>;
   return (
     <article className={cx("notification-row", item.status === "unread" && "notification-row--unread")}>

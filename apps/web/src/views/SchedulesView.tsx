@@ -139,7 +139,7 @@ function ExecutionRow({ execution }: { execution: ScheduleExecution }) {
   return (
     <li>
       <span className="execution-list__rail"><i /></span>
-      <div><header><time dateTime={execution.scheduledFor}>{formatDate(execution.scheduledFor)}</time><StatusChip status={execution.status} compact /></header><p>{execution.reason || (execution.status === "completed" ? "Unattended run completed." : execution.status === "dispatched" ? "Run dispatched to its box." : `Execution ${execution.status}.`)}</p>{execution.boxId ? <Link className="text-link" to={`/boxes/${execution.boxId}`}>Open output <Icon name="arrow" size={14} /></Link> : null}</div>
+      <div><header><time dateTime={execution.scheduledFor}>{formatDate(execution.scheduledFor)}</time><StatusChip status={execution.status} compact /></header><p>{execution.reason || (execution.status === "completed" ? "Unattended run completed." : execution.status === "dispatched" ? "Run dispatched to its box." : `Execution ${execution.status}.`)}</p>{execution.boxId ? <Link className="text-link" to={`/boxes/${execution.boxId}/agent-terminal`}>Open Agent Terminal <Icon name="arrow" size={14} /></Link> : null}</div>
     </li>
   );
 }

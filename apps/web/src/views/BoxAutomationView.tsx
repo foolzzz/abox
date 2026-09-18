@@ -25,10 +25,12 @@ export function BoxAutomationView({ boxId, panel }: { boxId: string; panel: BoxA
   return (
     <div className="page automation-page">
       <header className="automation-page__header">
-        <div><div className="automation-page__crumbs"><Link to="/boxes">Boxes</Link><span>/</span><Link to={`/boxes/${boxId}`}>{snapshot.name}</Link><span>/</span><strong>{PANELS.find((item) => item.id === panel)?.label}</strong></div><h1>{snapshot.name}</h1><p>Durable output and operational state from this box.</p></div>
-        <div><StatusChip status={snapshot.status} /><Link className="button button--secondary" to={`/boxes/${boxId}`}><Icon name="terminal" />Conversation</Link></div>
+        <div><div className="automation-page__crumbs"><Link to="/boxes">Boxes</Link><span>/</span><Link to={`/boxes/${boxId}/agent-terminal`}>{snapshot.name}</Link><span>/</span><strong>{PANELS.find((item) => item.id === panel)?.label}</strong></div><h1>{snapshot.name}</h1><p>Durable output and operational state from this box.</p></div>
+        <div><StatusChip status={snapshot.status} /><Link className="button button--secondary" to={`/boxes/${boxId}/agent-terminal`}><Icon name="terminal" />Agent Terminal</Link></div>
       </header>
       <nav className="box-panel-nav" aria-label="Box output">
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/agent-terminal`}><Icon name="terminal" /><span>Agent Terminal</span></Link>
+        <Link className="box-panel-nav__item" to={`/boxes/${boxId}/command-terminal`}><Icon name="terminal" /><span>Command Terminal</span></Link>
         {PANELS.map((item) => <Link className={cx("box-panel-nav__item", panel === item.id && "box-panel-nav__item--active")} aria-current={panel === item.id ? "page" : undefined} to={`/boxes/${boxId}/${item.id}`} key={item.id}><Icon name={item.icon} /><span>{item.label}</span></Link>)}
       </nav>
       <section className="automation-surface">

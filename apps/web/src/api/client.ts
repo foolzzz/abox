@@ -16,7 +16,6 @@ import type {
   CreateWorkspaceRequest,
   Host,
   Member,
-  Message,
   Meta,
   LoginRequest,
   Notification,
@@ -25,7 +24,6 @@ import type {
   ResetPasswordRequest,
   Schedule,
   ScheduleExecution,
-  SendMessageRequest,
   SubagentInstance,
   Team,
   TodoItem,
@@ -149,31 +147,12 @@ export const api = {
   listBoxes: (signal?: AbortSignal) => request<Box[]>("/boxes", { signal }),
   createBox: (body: CreateBoxRequest, signal?: AbortSignal) =>
     request<Box>("/boxes", { method: "POST", body, signal }),
-  deleteBox: (boxId: string, signal?: AbortSignal) =>
-    request<void>(`/boxes/${encode(boxId)}`, { method: "DELETE", signal }),
   getBox: (boxId: string, signal?: AbortSignal) =>
     request<BoxSnapshot>(`/boxes/${encode(boxId)}`, { signal }),
-  listMessages: (boxId: string, signal?: AbortSignal) =>
-    request<Message[]>(`/boxes/${encode(boxId)}/messages`, { signal }),
-  sendMessage: (boxId: string, body: SendMessageRequest, idempotencyKey: string, signal?: AbortSignal) =>
-    request<Message>(`/boxes/${encode(boxId)}/messages`, {
-      method: "POST",
-      body,
-      signal,
-      headers: { "Idempotency-Key": idempotencyKey }
-    }),
-  cancelMessage: (boxId: string, messageId: string, signal?: AbortSignal) =>
-    request<Message>(`/boxes/${encode(boxId)}/messages/${encode(messageId)}`, { method: "DELETE", signal }),
   getBoxAcl: (boxId: string, signal?: AbortSignal) =>
     request<AccessControlEntry[]>(`/boxes/${encode(boxId)}/acl`, { signal }),
   replaceBoxAcl: (boxId: string, body: ReplaceAccessControlRequest, signal?: AbortSignal) =>
     request<AccessControlEntry[]>(`/boxes/${encode(boxId)}/acl`, { method: "PUT", body, signal }),
-  interruptBox: (boxId: string, signal?: AbortSignal) =>
-    request<void>(`/boxes/${encode(boxId)}/interrupt`, { method: "POST", signal }),
-  stopBox: (boxId: string, signal?: AbortSignal) =>
-    request<void>(`/boxes/${encode(boxId)}/stop`, { method: "POST", signal }),
-  resumeBox: (boxId: string, signal?: AbortSignal) =>
-    request<void>(`/boxes/${encode(boxId)}/resume`, { method: "POST", signal }),
   listApprovals: (signal?: AbortSignal) => request<Approval[]>("/approvals", { signal }),
   decideApproval: (approvalId: string, body: ApprovalDecisionRequest, signal?: AbortSignal) =>
     request<Approval>(`/approvals/${encode(approvalId)}/decision`, { method: "POST", body, signal }),
