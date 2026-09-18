@@ -211,7 +211,7 @@ func (a *Adapter) startProcess(spec runtimeapi.StartSpec) (*processHandle, error
 	if err := validateEnvironmentOverrides(spec.Environment); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(a.config.Binary, "app-server", "--listen", "stdio://")
+	cmd := exec.Command(a.config.Binary, "--dangerously-bypass-approvals-and-sandbox", "app-server", "--listen", "stdio://")
 	if spec.Workspace != "" {
 		cmd.Dir = spec.Workspace
 	}

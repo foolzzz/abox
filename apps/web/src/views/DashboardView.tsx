@@ -85,7 +85,7 @@ export function DashboardView() {
           <div className="panel__header"><div><p className="eyebrow">Permissions</p><h2>{currentUser?.role ? `${currentUser.role.charAt(0).toUpperCase()}${currentUser.role.slice(1)} access` : "Current access"}</h2></div></div>
           {canCreateBox ? <Link className="quick-action" to="/boxes?create=1"><span><Icon name="box" /></span><div><strong>Create a box</strong><small>Start an agent in a workspace</small></div><Icon name="arrow" /></Link> : null}
           {canAdminister ? <Link className="quick-action" to="/workspaces?create=1"><span><Icon name="workspace" /></span><div><strong>Add a workspace</strong><small>Register a host directory</small></div><Icon name="arrow" /></Link> : null}
-          {canAdminister ? <Link className="quick-action" to="/agents?create=1"><span><Icon name="agent" /></span><div><strong>Define an agent</strong><small>Select OMP or Claude and set instructions</small></div><Icon name="arrow" /></Link> : null}
+          {canAdminister ? <Link className="quick-action" to="/agents?create=1"><span><Icon name="agent" /></span><div><strong>Define an agent</strong><small>Select OMP, Codex, or Claude Code</small></div><Icon name="arrow" /></Link> : null}
           {!canCreateBox ? <div className="permission-summary"><Icon name="approval" /><p>Your role is read-only. You can inspect resources explicitly shared with you.</p></div> : null}
         </aside>
       </div>

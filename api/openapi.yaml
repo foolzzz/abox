@@ -84,6 +84,10 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Member'}
+    delete:
+      operationId: deleteAccount
+      responses:
+        '204': {description: Account deleted}
   /members/{memberId}/password:
     parameters:
       - name: memberId
@@ -136,6 +140,16 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Agent'}
+  /agents/{agentId}:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    delete:
+      operationId: deleteAgent
+      responses:
+        '204': {description: Agent definition deleted}
   /hosts:
     get:
       operationId: listHosts
@@ -147,6 +161,16 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Host'}
+  /hosts/{hostId}:
+    parameters:
+      - name: hostId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    delete:
+      operationId: deleteHost
+      responses:
+        '204': {description: Offline Host revoked}
   /workspaces:
     get:
       operationId: listWorkspaces
@@ -171,6 +195,16 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Workspace'}
+  /workspaces/{workspaceId}:
+    parameters:
+      - name: workspaceId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    delete:
+      operationId: deleteWorkspace
+      responses:
+        '204': {description: Workspace archived}
   /boxes:
     get:
       operationId: listBoxes
@@ -206,6 +240,51 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/BoxSnapshot'}
+    delete:
+      operationId: deleteBox
+      responses:
+        '202': {description: Box termination dispatched}
+        '204': {description: Box terminated}
+  /boxes/{boxId}/model:
+    parameters:
+      - {$ref: '#/components/parameters/BoxId'}
+    patch:
+      operationId: updateBoxModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model]
+              properties:
+                model: {type: string, maxLength: 128}
+      responses:
+        '200':
+          description: Box model changed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Box'}
+  /boxes/{boxId}/visibility:
+    parameters:
+      - {$ref: '#/components/parameters/BoxId'}
+    patch:
+      operationId: updateBoxVisibility
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility: {enum: [private, org]}
+      responses:
+        '200':
+          description: Box visibility changed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Box'}
   /boxes/{boxId}/messages:
     parameters:
       - {$ref: '#/components/parameters/BoxId'}
@@ -384,7 +463,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
-        runtimeType: {enum: [omp, claude, acp]}
+        runtimeType: {enum: [omp, codex, claude, acp]}
         version: {type: integer}
         model: {type: [string, 'null']}
         systemPrompt: {type: string}
@@ -393,7 +472,7 @@ components:
       required: [name, runtimeType]
       properties:
         name: {type: string}
-        runtimeType: {enum: [omp, claude, acp]}
+        runtimeType: {enum: [omp, codex, claude, acp]}
         model: {type: [string, 'null']}
         systemPrompt: {type: string}
     Host:
@@ -431,6 +510,8 @@ components:
         agentId: {type: string, format: uuid}
         hostId: {type: string, format: uuid}
         workspaceId: {type: string, format: uuid}
+        model: {type: string}
+        visibility: {enum: [private, org]}
         status: {type: string}
         runtimeType: {type: string}
         updatedAt: {type: string, format: date-time}
@@ -440,6 +521,7 @@ components:
       properties:
         name: {type: string}
         agentId: {type: string, format: uuid}
+        model: {type: string, maxLength: 128}
         hostId: {type: string, format: uuid}
         workspaceId: {type: string, format: uuid}
     BoxSnapshot:

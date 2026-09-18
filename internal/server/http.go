@@ -610,13 +610,20 @@ func (s *Server) handleResume(writer http.ResponseWriter, request *http.Request)
 		_ = json.Unmarshal(agent.ApprovalPolicy, &approvalPolicy)
 		approvalMode = strings.TrimSpace(approvalPolicy.Mode)
 	}
-	if approvalMode == "" && box.RuntimeType == "omp" {
-		approvalMode = "always-ask"
+	if approvalMode == "" {
+		switch box.RuntimeType {
+		case "omp":
+			approvalMode = "yolo"
+		case "codex":
+			approvalMode = "never"
+		case "claude":
+			approvalMode = "bypass"
+		}
 	}
 	payload, err := json.Marshal(map[string]any{
 		"runtime":      box.RuntimeType,
 		"workspace":    workspace.Path,
-		"model":        agent.Model,
+		"model":        box.Model,
 		"approvalMode": approvalMode,
 	})
 	if err != nil {

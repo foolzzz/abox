@@ -705,7 +705,8 @@ func validateScheduleTargets(ctx context.Context, q querier, organizationID, age
         JOIN hosts h ON h.organization_id = a.organization_id AND h.id = $3
         WHERE a.organization_id = $1 AND a.id = $2 AND a.status = 'active'
           AND av.lifecycle_status = 'published'
-          AND w.host_id = h.id AND w.status = 'ready' AND h.status <> 'revoked'`,
+          AND w.host_id = h.id AND w.status = 'ready' AND h.status <> 'revoked'
+        FOR SHARE OF a, av, w, h`,
 		organizationID, agentID, hostID, workspaceID).Scan(&agentVersionID)
 	if err != nil {
 		return "", mapError("validate schedule targets", err)

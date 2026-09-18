@@ -130,8 +130,21 @@ func (s *Store) CreateAgent(ctx context.Context, user domain.User, input domain.
 	if input.RuntimeType == "" {
 		input.RuntimeType = "omp"
 	}
+	approvalMode := ""
+	switch input.RuntimeType {
+	case "omp":
+		approvalMode = "yolo"
+	case "codex":
+		approvalMode = "never"
+	case "claude":
+		approvalMode = "bypass"
+	}
+	approvalPolicy, err := json.Marshal(map[string]string{"mode": approvalMode})
+	if err != nil {
+		return domain.Agent{}, fmt.Errorf("encode approval policy: %w", err)
+	}
 	var result domain.Agent
-	err := s.withTx(ctx, func(tx pgx.Tx) error {
+	err = s.withTx(ctx, func(tx pgx.Tx) error {
 		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
 			return err
 		}
@@ -156,10 +169,11 @@ func (s *Store) CreateAgent(ctx context.Context, user domain.User, input domain.
 		_, err = tx.Exec(ctx, `
             INSERT INTO agent_versions(
                 id, organization_id, agent_id, version_no, lifecycle_status,
-                runtime_type, model, prompt_mode, system_prompt, created_by_user_id, published_at
-            ) VALUES ($1,$2,$3,1,'published',$4,$5,'append',$6,$7,now())`,
+                runtime_type, model, prompt_mode, system_prompt, approval_policy,
+                created_by_user_id, published_at
+            ) VALUES ($1,$2,$3,1,'published',$4,$5,'append',$6,$7,$8,now())`,
 			versionID, user.OrganizationID, agentID, input.RuntimeType,
-			nullableText(input.Model), input.SystemPrompt, user.ID,
+			nullableText(input.Model), input.SystemPrompt, approvalPolicy, user.ID,
 		)
 		if err != nil {
 			return mapError("insert published agent version", err)

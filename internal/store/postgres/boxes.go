@@ -216,7 +216,7 @@ func (s *Store) UpdateBoxModel(ctx context.Context, user domain.User, boxID, mod
 			created, err := insertHostCommandTx(ctx, tx, domain.HostCommand{
 				OrganizationID: organizationID, HostID: hostID, BoxID: boxID,
 				RuntimeInstanceID: runtimeID, CommandType: "runtime.stop",
-				Payload: json.RawMessage(`{"mode":"graceful"}`),
+				Payload:        json.RawMessage(`{"mode":"graceful"}`),
 				IdempotencyKey: fmt.Sprintf("runtime:model-change:%s:%d", boxID, version), Status: "pending",
 			})
 			if err != nil {
