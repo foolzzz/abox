@@ -5,7 +5,7 @@ import { Button, InlineAlert } from "../components/ui";
 import { Icon } from "../components/Icon";
 
 export function LoginView({ onAuthenticated }: { onAuthenticated: (user: CurrentUser) => void }) {
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);

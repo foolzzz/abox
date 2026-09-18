@@ -200,12 +200,23 @@ func (s *Store) ChangePassword(ctx context.Context, user domain.User, passwordHa
 	})
 }
 
+func lockAccountOrganization(ctx context.Context, tx pgx.Tx, organizationID string) error {
+	var lockedID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, organizationID).Scan(&lockedID); err != nil {
+		return mapError("lock account organization", err)
+	}
+	return nil
+}
+
 func (s *Store) CreateAccount(ctx context.Context, user domain.User, input domain.CreateAccountInput) (domain.Member, error) {
 	if input.Role != "admin" && input.Role != "user" {
 		return domain.Member{}, fmt.Errorf("%w: invalid account role %q", storepkg.ErrInvalidState, input.Role)
 	}
 	var result domain.Member
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := lockAccountOrganization(ctx, tx, user.OrganizationID); err != nil {
+			return err
+		}
 		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
 			return err
 		}
@@ -237,6 +248,9 @@ func (s *Store) CreateAccount(ctx context.Context, user domain.User, input domai
 func (s *Store) UpdateAccount(ctx context.Context, user domain.User, memberID string, input domain.UpdateAccountInput) (domain.Member, error) {
 	var result domain.Member
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := lockAccountOrganization(ctx, tx, user.OrganizationID); err != nil {
+			return err
+		}
 		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
 			return err
 		}
@@ -263,7 +277,7 @@ func (s *Store) UpdateAccount(ctx context.Context, user domain.User, memberID st
 				return fmt.Errorf("%w: invalid account status %q", storepkg.ErrInvalidState, status)
 			}
 		}
-		if status == "active" && !current.HasPassword {
+		if input.Status != nil && status == "active" && !current.HasPassword {
 			return fmt.Errorf("%w: an account without a local password cannot be activated", storepkg.ErrInvalidState)
 		}
 		if memberID == user.ID && (role != current.Role || status != current.Status) {
@@ -310,6 +324,9 @@ func (s *Store) DeleteAccount(ctx context.Context, user domain.User, memberID st
 		return fmt.Errorf("%w: administrators cannot delete their own account", storepkg.ErrForbidden)
 	}
 	return s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := lockAccountOrganization(ctx, tx, user.OrganizationID); err != nil {
+			return err
+		}
 		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
 			return err
 		}
@@ -357,6 +374,9 @@ func (s *Store) ResetAccountPassword(ctx context.Context, user domain.User, memb
 	}
 	var result domain.Member
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := lockAccountOrganization(ctx, tx, user.OrganizationID); err != nil {
+			return err
+		}
 		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
 			return err
 		}
