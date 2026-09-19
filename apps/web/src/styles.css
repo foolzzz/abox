@@ -198,6 +198,9 @@ button:disabled { cursor: not-allowed; }
 .resource-card__facts dt { margin-bottom: 4px; color: var(--text-faint); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; }
 .resource-card__facts dd { margin: 0; overflow: hidden; font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
 .resource-card__actions { display: flex; justify-content: flex-end; padding-top: 14px; }
+.resource-card__controls { display: flex; align-items: center; gap: 8px; }
+.resource-card__delete { display: inline-grid; width: 32px; height: 32px; place-items: center; color: var(--text-faint); background: transparent; border: 1px solid var(--border-soft); border-radius: 8px; }
+.resource-card__delete:hover { color: var(--red); background: var(--red-soft); border-color: rgba(255, 124, 134, .45); }
 .host-card { min-height: 260px; }
 .runtime-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 22px; }
 .runtime-list span { padding: 4px 7px; color: var(--blue); background: var(--blue-soft); border-radius: 6px; font-family: "JetBrains Mono", monospace; font-size: 0.64rem; text-transform: uppercase; }
@@ -208,7 +211,7 @@ button:disabled { cursor: not-allowed; }
 
 .table-panel { overflow: hidden; background: rgba(19, 27, 39, 0.82); border: 1px solid var(--border-soft); border-radius: var(--radius); }
 .data-table__header, .data-table__row { display: grid; align-items: center; gap: 16px; padding: 0 20px; }
-.data-table--workspaces .data-table__header, .data-table--workspaces .data-table__row { grid-template-columns: minmax(170px, 1.15fr) minmax(100px, .7fr) minmax(180px, 1.35fr) minmax(90px, .6fr) minmax(100px, .65fr) 72px; }
+.data-table--workspaces .data-table__header, .data-table--workspaces .data-table__row { grid-template-columns: minmax(170px, 1.15fr) minmax(100px, .7fr) minmax(180px, 1.35fr) minmax(90px, .6fr) minmax(100px, .65fr) 88px; }
 .data-table__header { min-height: 44px; color: var(--text-faint); background: rgba(255, 255, 255, 0.018); border-bottom: 1px solid var(--border-soft); font-size: 0.64rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
 .data-table__row { min-height: 72px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); font-size: 0.76rem; }
 .data-table__row:last-child { border-bottom: 0; }
@@ -248,7 +251,11 @@ button:disabled { cursor: not-allowed; }
 .box-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
 .box-card { display: flex; min-height: 255px; flex-direction: column; padding: 19px; background: rgba(19, 27, 39, 0.82); border: 1px solid var(--border-soft); border-radius: var(--radius); transition: transform 150ms ease, border-color 150ms ease, background 150ms ease; }
 .box-card:hover { transform: translateY(-2px); background: var(--surface); border-color: #35445a; }
-.box-card__top { display: flex; justify-content: space-between; margin-bottom: 19px; }
+.box-card__top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 19px; }
+.box-card__controls { display: flex; align-items: center; gap: 8px; }
+.box-card__delete { display: inline-grid; width: 32px; height: 32px; place-items: center; color: var(--text-faint); background: transparent; border: 1px solid var(--border-soft); border-radius: 8px; }
+.box-card__delete:hover { color: var(--red); background: var(--red-soft); border-color: rgba(255, 124, 134, .45); }
+.box-card__main { display: flex; min-height: 0; flex: 1; flex-direction: column; color: inherit; }
 .box-card h2 { margin-bottom: 5px; font-size: 1.05rem; }
 .box-card p { color: var(--text-muted); font-size: 0.76rem; }
 .box-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
@@ -571,6 +578,7 @@ select:disabled, input:disabled, textarea:disabled { opacity: 0.55; }
   .data-table__row [role="cell"]:first-child { grid-column: 1 / -1; }
   .data-table__row [role="cell"]:first-child::before { display: none; }
   .data-table__row [role="cell"]:nth-child(3) { grid-column: 1 / -1; align-items: flex-start; }
+  .data-table--workspaces .data-table__row [role="cell"]:last-child { grid-column: 1 / -1; }
   .data-table__row [role="cell"]:nth-child(3)::before { margin-top: 2px; }
   .table-path { white-space: normal; word-break: break-all; }
   .form-grid--two { grid-template-columns: 1fr; }

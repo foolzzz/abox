@@ -34,7 +34,7 @@ export function HostsView() {
 
   const deleteHost = async () => {
     const host = deletingHost;
-    if (!host) return;
+    if (!host || host.status !== "offline") return;
     setDeleteBusy(true);
     setDeleteError(undefined);
     try {
@@ -58,7 +58,7 @@ export function HostsView() {
           <section className="card-grid" aria-label="Execution hosts">
             {hosts.map((host) => (
               <article className="resource-card host-card" key={host.id}>
-                <div className="resource-card__top"><span className="resource-icon resource-icon--host"><Icon name="host" /></span><StatusChip status={host.status} /></div>
+                <div className="resource-card__top"><span className="resource-icon resource-icon--host"><Icon name="host" /></span><span className="resource-card__controls"><StatusChip status={host.status} />{canDelete ? <button className="resource-card__delete" type="button" title={`Delete ${host.name}`} aria-label={`Delete ${host.name}`} onClick={() => openDelete(host)}><Icon name="trash" size={16} /></button> : null}</span></div>
                 <div className="resource-card__body"><h2>{host.name}</h2><p className="resource-card__subtitle mono">{host.systemHostname || "Hostname not reported"}</p><p className="resource-card__description">{[host.os, host.arch].filter(Boolean).join(" · ") || "Platform not reported"}</p></div>
                 <div className="runtime-list" aria-label="Supported runtimes">{host.runtimes.length ? host.runtimes.map((runtime) => <span key={runtime}>{runtime}</span>) : <small>No runtimes reported</small>}</div>
                 <dl className="resource-card__facts">
@@ -66,7 +66,6 @@ export function HostsView() {
                   <div><dt>Last seen</dt><dd>{relativeTime(host.lastSeenAt)}</dd></div>
                   <div><dt>Capacity</dt><dd>{host.maxActiveBoxes ?? "—"} boxes</dd></div>
                 </dl>
-                {canDelete && host.status === "offline" ? <div className="resource-card__actions"><Button variant="danger" icon="trash" onClick={() => openDelete(host)}>Delete host</Button></div> : null}
               </article>
             ))}
           </section>
@@ -75,16 +74,16 @@ export function HostsView() {
       <Modal
         open={Boolean(deletingHost)}
         title={`Delete ${deletingHost?.name ?? "host"}?`}
-        description="Revoke this offline execution host and remove it from the fleet."
+        description={deletingHost?.status === "offline" ? "Revoke this offline execution host and remove it from the fleet." : "This execution host must be offline before it can be deleted."}
         onClose={closeDelete}
         size="small"
       >
         <div className="confirm-dialog">
           {deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}
-          <InlineAlert tone="warning">Hosts with active Boxes or non-archived Workspaces cannot be deleted. A revoked daemon credential cannot reconnect.</InlineAlert>
+          <InlineAlert tone="warning">{deletingHost?.status === "offline" ? "Hosts with active Boxes or non-archived Workspaces cannot be deleted. A revoked daemon credential cannot reconnect." : "The host must be offline before it can be deleted. Stop agentboxd on that host, refresh this page, then try again."}</InlineAlert>
           <div className="modal__actions">
             <Button disabled={deleteBusy} onClick={closeDelete}>Cancel</Button>
-            <Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => void deleteHost()}>Delete host</Button>
+            <Button variant="danger" icon="trash" busy={deleteBusy} disabled={deletingHost?.status !== "offline"} onClick={() => void deleteHost()}>Delete host</Button>
           </div>
         </div>
       </Modal>

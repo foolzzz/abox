@@ -3,7 +3,7 @@ import { api, errorMessage } from "../api/client";
 import type { Agent, Box, Host, ResourceRole, Workspace } from "../api/types";
 import { Icon } from "../components/Icon";
 import { useToast } from "../components/Toast";
-import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, Modal, PageHeader, RefreshButton, StatusChip, cx } from "../components/ui";
+import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, Modal, PageHeader, RefreshButton, StatusChip } from "../components/ui";
 import { useResource } from "../hooks/useResource";
 import { roleAtLeast, useAccess } from "../lib/access";
 import { formatDate } from "../lib/format";
@@ -34,6 +34,10 @@ export function BoxesView() {
   const [status, setStatus] = useState("all");
   const canCreate = roleAtLeast(currentUser?.role, "user");
   const createOpen = canCreate && new URLSearchParams(location.search).get("create") === "1";
+  const { notify } = useToast();
+  const [deletingBox, setDeletingBox] = useState<Box>();
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
 
   if (resource.loading) return <LoadingState label={t("boxes.loading")} />;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
@@ -49,6 +53,22 @@ export function BoxesView() {
     const text = `${box.name} ${agentNames.get(box.agentId) ?? ""} ${hostNames.get(box.hostId) ?? ""}`.toLowerCase();
     return matchesStatus && (!normalizedQuery || text.includes(normalizedQuery));
   });
+  const canDeleteBox = (box: Box) => roleAtLeast(currentUser?.role, "admin") || box.ownerUserId === currentUser?.id;
+  const deleteBox = async () => {
+    if (!deletingBox) return;
+    setDeleteBusy(true);
+    setDeleteError(undefined);
+    try {
+      await api.deleteBox(deletingBox.id);
+      resource.setData((current) => current ? { ...current, boxes: current.boxes.filter((box) => box.id !== deletingBox.id) } : current);
+      notify(t("box.deleted"));
+      setDeletingBox(undefined);
+    } catch (requestError) {
+      setDeleteError(errorMessage(requestError));
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
   return (
     <div className="page">
@@ -64,12 +84,14 @@ export function BoxesView() {
           {filtered.length ? (
             <section className="box-grid" aria-label="Agent boxes">
               {filtered.map((box) => (
-                <Link className="box-card" to={`/boxes/${box.id}/agent-terminal`} key={box.id}>
-                  <div className="box-card__top"><span className="resource-icon resource-icon--box"><Icon name="box" /></span><StatusChip status={box.status} compact /></div>
-                  <div><h2>{box.name}</h2><p>{agentNames.get(box.agentId) ?? "Unknown agent"}</p></div>
-                  <dl><div><dt>Host</dt><dd>{hostNames.get(box.hostId) ?? "Unknown"}</dd></div><div><dt>Workspace</dt><dd>{workspaceNames.get(box.workspaceId) ?? "Unknown"}</dd></div></dl>
-                  <footer><span>{box.runtimeType?.toUpperCase() ?? "Runtime"}</span><span>Updated {formatDate(box.updatedAt)}</span><Icon name="arrow" /></footer>
-                </Link>
+                <article className="box-card" key={box.id}>
+                  <div className="box-card__top"><span className="resource-icon resource-icon--box"><Icon name="box" /></span><span className="box-card__controls"><StatusChip status={box.status} compact />{canDeleteBox(box) ? <button className="box-card__delete" type="button" title={t("box.delete")} aria-label={`Delete ${box.name}`} onClick={() => { setDeleteError(undefined); setDeletingBox(box); }}><Icon name="trash" size={16} /></button> : null}</span></div>
+                  <Link className="box-card__main" to={`/boxes/${box.id}/agent-terminal`}>
+                    <div><h2>{box.name}</h2><p>{agentNames.get(box.agentId) ?? "Unknown agent"}</p></div>
+                    <dl><div><dt>Host</dt><dd>{hostNames.get(box.hostId) ?? "Unknown"}</dd></div><div><dt>Workspace</dt><dd>{workspaceNames.get(box.workspaceId) ?? "Unknown"}</dd></div></dl>
+                    <footer><span>{box.runtimeType?.toUpperCase() ?? "Runtime"}</span><span>Updated {formatDate(box.updatedAt)}</span><Icon name="arrow" /></footer>
+                  </Link>
+                </article>
               ))}
             </section>
           ) : <EmptyState icon="search" title="No boxes match" description="Adjust the search or status filter to see more boxes." />}
@@ -89,6 +111,9 @@ export function BoxesView() {
           navigate(`/boxes/${box.id}/agent-terminal`, { replace: true });
         }}
       />
+      <Modal open={Boolean(deletingBox)} title={t("box.deleteTitle", { name: deletingBox?.name ?? "Agent Box" })} description={t("box.deleteDescription")} onClose={() => !deleteBusy && setDeletingBox(undefined)} size="small">
+        <div className="confirm-dialog">{deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}<InlineAlert tone="warning">{t("box.deleteWarning")}</InlineAlert><div className="modal__actions"><Button disabled={deleteBusy} onClick={() => setDeletingBox(undefined)}>{t("common.cancel")}</Button><Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => void deleteBox()}>{t("box.deleteConfirm")}</Button></div></div>
+      </Modal>
     </div>
   );
 }
@@ -116,7 +141,6 @@ function CreateBoxModal({
 }) {
   const { notify } = useToast();
   const { t } = useI18n();
-  const [step, setStep] = useState(1);
   const [name, setName] = useState("");
   const [agentId, setAgentId] = useState("");
   const [hostId, setHostId] = useState("");
@@ -131,7 +155,6 @@ function CreateBoxModal({
 
   useEffect(() => {
     if (!open) {
-      setStep(1);
       setError(undefined);
       setPlacementMode(organizationAdmin ? "path" : "workspace");
     }
@@ -189,10 +212,6 @@ function CreateBoxModal({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (step === 1) {
-      setStep(2);
-      return;
-    }
     if (placementMode === "workspace" && !organizationAdmin && workspaceAccess !== "owner" && workspaceAccess !== "operator") return;
     setSubmitting(true);
     setError(undefined);
@@ -235,35 +254,27 @@ function CreateBoxModal({
 
   return (
     <Modal open={open} onClose={onClose} title={t("boxes.createTitle")} description={t("boxes.createDescription")} size="large">
-      <div className="stepper" aria-label="Creation progress"><span className={cx("stepper__step", step >= 1 && "stepper__step--active")}><b>1</b>{t("boxes.stepAgent")}</span><span className="stepper__line" /><span className={cx("stepper__step", step >= 2 && "stepper__step--active")}><b>2</b>{t("boxes.stepDirectory")}</span></div>
       <form className="form" onSubmit={submit}>
         {error ? <InlineAlert>{error}</InlineAlert> : null}
-        {step === 1 ? (
-          <>
-            {agents.length === 0 ? <InlineAlert tone="warning">Create an agent definition before creating a box.</InlineAlert> : null}
-            <label className="field"><span>{t("boxes.boxName")}</span><input autoFocus required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /><small>{t("boxes.boxNameHint")}</small></label>
-            <label className="field"><span>{t("boxes.stepAgent")}</span><select required value={selectedAgentId} onChange={(event) => { setAgentId(event.target.value); setHostId(""); setWorkspaceId(""); }}><option value="">{t("boxes.selectAgent")}</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.name} · {agent.runtimeType.toUpperCase()}</option>)}</select></label>
-            {selectedAgent ? <div className="selection-summary"><Icon name="agent" /><div><strong>{selectedAgent.name}</strong><small>{selectedAgent.model || "Runtime default model"} · version {selectedAgent.version}</small></div><StatusChip status={selectedAgent.runtimeType} compact /></div> : null}
-          </>
+        {agents.length === 0 ? <InlineAlert tone="warning">Create an agent definition before creating a box.</InlineAlert> : null}
+        <label className="field"><span>{t("boxes.boxName")}</span><input autoFocus required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /><small>{t("boxes.boxNameHint")}</small></label>
+        <label className="field"><span>{t("boxes.stepAgent")}</span><select required value={selectedAgentId} onChange={(event) => { setAgentId(event.target.value); setHostId(""); setWorkspaceId(""); }}><option value="">{t("boxes.selectAgent")}</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.name} · {agent.runtimeType.toUpperCase()}</option>)}</select></label>
+        {selectedAgent ? <div className="selection-summary"><Icon name="agent" /><div><strong>{selectedAgent.name}</strong><small>{selectedAgent.model || "Runtime default model"} · version {selectedAgent.version}</small></div><StatusChip status={selectedAgent.runtimeType} compact /></div> : null}
+        {selectedAgent && compatibleHosts.length === 0 ? <InlineAlert tone="warning">No online host supports {selectedAgent.runtimeType.toUpperCase()}.</InlineAlert> : null}
+        <label className="field"><span>{t("boxes.host")}</span><select required value={selectedHostId} onChange={(event) => { setHostId(event.target.value); setWorkspaceId(""); }} disabled={!selectedAgentId}><option value="">{t("boxes.selectHost")}</option>{compatibleHosts.map((host) => <option value={host.id} key={host.id}>{host.name} · {host.systemHostname || [host.os, host.arch].filter(Boolean).join("/")} · {host.runtimes.join(", ")}</option>)}</select></label>
+        {organizationAdmin ? <fieldset className="segmented-field"><legend>{t("boxes.stepDirectory")}</legend><label><input type="radio" name="placementMode" checked={placementMode === "path"} onChange={() => setPlacementMode("path")} />{t("boxes.pathMode")}</label><label><input type="radio" name="placementMode" checked={placementMode === "workspace"} onChange={() => setPlacementMode("workspace")} />{t("boxes.workspaceMode")}</label></fieldset> : null}
+        {placementMode === "path" ? (
+          <label className="field"><span>{t("boxes.projectPath")}</span><input className="mono" required value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/Users/name/projects/my-project" /><small>{t("boxes.projectPathHint")}</small></label>
         ) : (
-          <>
-            {compatibleHosts.length === 0 ? <InlineAlert tone="warning">No online host supports {selectedAgent?.runtimeType.toUpperCase() ?? "this runtime"}.</InlineAlert> : null}
-            <label className="field"><span>{t("boxes.host")}</span><select autoFocus required value={selectedHostId} onChange={(event) => { setHostId(event.target.value); setWorkspaceId(""); }}><option value="">{t("boxes.selectHost")}</option>{compatibleHosts.map((host) => <option value={host.id} key={host.id}>{host.name} · {host.systemHostname || [host.os, host.arch].filter(Boolean).join("/")} · {host.runtimes.join(", ")}</option>)}</select></label>
-            {organizationAdmin ? <fieldset className="segmented-field"><legend>{t("boxes.stepDirectory")}</legend><label><input type="radio" name="placementMode" checked={placementMode === "path"} onChange={() => setPlacementMode("path")} />{t("boxes.pathMode")}</label><label><input type="radio" name="placementMode" checked={placementMode === "workspace"} onChange={() => setPlacementMode("workspace")} />{t("boxes.workspaceMode")}</label></fieldset> : null}
-            {placementMode === "path" ? (
-              <label className="field"><span>{t("boxes.projectPath")}</span><input className="mono" required value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/Users/name/projects/my-project" /><small>{t("boxes.projectPathHint")}</small></label>
-            ) : (
-              <label className="field"><span>{t("boxes.registeredWorkspace")}</span><select required value={selectedWorkspaceId} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!selectedHostId}><option value="">{t("boxes.selectWorkspace")}</option>{readyWorkspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.path}</option>)}</select>{selectedHostId && readyWorkspaces.length === 0 ? <small className="field__error">{t("boxes.noWorkspace")}</small> : null}</label>
-            )}
-            {selectedHost && placementMode === "path" && projectPath.trim() ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{normalizedProjectPath}</strong><small>{selectedHost.name} · {selectedHost.systemHostname || "hostname unavailable"}</small></div><StatusChip status="validation" compact /></div> : null}
-            {selectedHost && placementMode === "workspace" && selectedWorkspace ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{selectedWorkspace.name}</strong><small>{selectedHost.name} · {selectedHost.systemHostname || "hostname unavailable"} · {selectedWorkspace.path}</small></div>{checkingWorkspaceAccess ? <span className="spinner spinner--small" /> : <StatusChip status={workspaceAccess ?? selectedWorkspace.status} compact />}</div> : null}
-            {workspaceAccessError ? <InlineAlert>{workspaceAccessError}</InlineAlert> : null}
-            {placementMode === "workspace" && selectedWorkspace && !checkingWorkspaceAccess && !workspaceAccessError && !canUseSelectedWorkspace ? <InlineAlert tone="warning">{t("boxes.viewerWorkspace")}</InlineAlert> : null}
-          </>
+          <label className="field"><span>{t("boxes.registeredWorkspace")}</span><select required value={selectedWorkspaceId} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!selectedHostId}><option value="">{t("boxes.selectWorkspace")}</option>{readyWorkspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.path}</option>)}</select>{selectedHostId && readyWorkspaces.length === 0 ? <small className="field__error">{t("boxes.noWorkspace")}</small> : null}</label>
         )}
+        {selectedHost && placementMode === "path" && projectPath.trim() ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{normalizedProjectPath}</strong><small>{selectedHost.name} · {selectedHost.systemHostname || "hostname unavailable"}</small></div><StatusChip status="validation" compact /></div> : null}
+        {selectedHost && placementMode === "workspace" && selectedWorkspace ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{selectedWorkspace.name}</strong><small>{selectedHost.name} · {selectedHost.systemHostname || "hostname unavailable"} · {selectedWorkspace.path}</small></div>{checkingWorkspaceAccess ? <span className="spinner spinner--small" /> : <StatusChip status={workspaceAccess ?? selectedWorkspace.status} compact />}</div> : null}
+        {workspaceAccessError ? <InlineAlert>{workspaceAccessError}</InlineAlert> : null}
+        {placementMode === "workspace" && selectedWorkspace && !checkingWorkspaceAccess && !workspaceAccessError && !canUseSelectedWorkspace ? <InlineAlert tone="warning">{t("boxes.viewerWorkspace")}</InlineAlert> : null}
         <div className="modal__actions">
-          {step === 1 ? <Button type="button" onClick={onClose}>{t("boxes.cancel")}</Button> : <Button type="button" icon="chevron" onClick={() => setStep(1)}>{t("boxes.back")}</Button>}
-          <Button type="submit" variant="primary" icon={step === 1 ? "arrow" : "spark"} busy={submitting || checkingWorkspaceAccess} disabled={step === 1 ? !name.trim() || !selectedAgentId : !directoryReady}>{step === 1 ? t("boxes.chooseDirectory") : submitting && placementMode === "path" ? t("boxes.validatingDirectory") : t("boxes.create")}</Button>
+          <Button type="button" onClick={onClose}>{t("boxes.cancel")}</Button>
+          <Button type="submit" variant="primary" icon="spark" busy={submitting || checkingWorkspaceAccess} disabled={!name.trim() || !selectedAgentId || !directoryReady}>{submitting && placementMode === "path" ? t("boxes.validatingDirectory") : t("boxes.create")}</Button>
         </div>
       </form>
     </Modal>
