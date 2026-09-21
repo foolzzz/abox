@@ -278,6 +278,16 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] 删除 Box 会从列表隐藏 Session，并终止 Managed Runtime 和 tmux Agent Terminal。
 - [ ] 真实手机/Tailnet 网络切换后重新 attach 同一 tmux Session。
 
+### 13.8 2026-09-18 UI 删除与创建回归待办
+
+- [x] **Box 列表删除**：Box Owner 或 Admin 在每张有权限的 Box 卡片上无需滚动即可看到 `Delete <Box name>`；点击后显示确认弹窗，确认成功后 Box 从列表消失，后端依赖冲突以弹窗内联错误保留并可读；无权限用户不显示删除操作。
+- [x] **Host 卡片删除**：Admin 在每张 Host 卡片上无需滚动即可看到 `Delete <Host name>`；Offline Host 可打开确认弹窗并删除，无资源依赖时成功、存在依赖时将 409 冲突显示为弹窗内联错误；Online Host 的删除控件仍保持可见但不可执行，并明确提示必须先离线；非 Admin 不显示删除操作。
+- [x] **Agent Definition 删除**：Admin 在每条 Agent Definition 上无需滚动即可看到 `Delete <Agent name>` 并通过确认弹窗删除未被活跃 Box 或 Schedule 引用的定义；受保护引用返回的冲突显示为弹窗内联错误；非 Admin 不显示删除操作。
+- [x] **Workspace 删除**：Admin 在每条 Workspace 上无需滚动即可看到 `Delete <Workspace name>` 并通过确认弹窗删除未被活跃 Box 使用的 Workspace；受保护引用返回的冲突显示为弹窗内联错误；非 Admin 不显示删除操作。
+- [x] **一步创建 Agent Box**：创建页在同一表单中同时提供名称、Agent、目标 Host、项目目录/Workspace，并且仅有一次提交动作；不存在分步器，成功提交后创建完整绑定的 Box。
+- [x] **PWA 更新激活**：新 Web 构建发布后，已打开或再次访问的 PWA 客户端自动激活等待中的 Service Worker，并自动重新加载到最新构建，无需用户手动清缓存或关闭全部标签页。
+- [x] **浏览器 E2E 回归覆盖**：真实 Chrome 用稳定的可访问名称定位并执行 Box、Host、Agent Definition、Workspace 四类删除流程（包括权限、Host online/offline 和受保护删除冲突），并覆盖一步创建 Agent Box 与 PWA 新版本自动激活/重载；隔离 Fixture Suite `npm --workspace apps/web run test:e2e` 共 7 项通过，真实本机部署 Suite `npm --workspace apps/web run test:e2e:local` 共 2 项通过。
+
 
 ## 14. 范围外
 

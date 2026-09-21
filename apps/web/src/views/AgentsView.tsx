@@ -124,7 +124,7 @@ function AgentCard({ agent, canDelete, onDelete }: { agent: Agent; canDelete: bo
     <article className="resource-card">
       <div className="resource-card__top">
         <span className="resource-icon resource-icon--agent"><Icon name="agent" /></span>
-        <StatusChip status={agent.runtimeType} compact />
+        <span className="resource-card__controls"><StatusChip status={agent.runtimeType} compact />{canDelete ? <button className="resource-card__delete" type="button" title={`Delete ${agent.name}`} aria-label={`Delete ${agent.name}`} onClick={onDelete}><Icon name="trash" size={16} /></button> : null}</span>
       </div>
       <div className="resource-card__body">
         <h2>{agent.name}</h2>
@@ -135,7 +135,6 @@ function AgentCard({ agent, canDelete, onDelete }: { agent: Agent; canDelete: bo
         <div><dt>{t("agents.version")}</dt><dd>v{agent.version}</dd></div>
         <div><dt>{t("agents.updated")}</dt><dd>{formatDate(agent.updatedAt ?? agent.createdAt)}</dd></div>
       </dl>
-      {canDelete ? <div className="resource-card__actions"><Button variant="ghost" icon="trash" onClick={onDelete}>Delete</Button></div> : null}
     </article>
   );
 }
