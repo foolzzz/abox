@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Claude Host 探测同时支持已登录的 OAuth/Keychain 凭据和 daemon 环境中的 `ANTHROPIC_API_KEY`；已认证主机自动备份并完成 Claude 交互式 Onboarding 标记，无需逐台重复登录。
+
+### Fixed
+
+- Claude Agent Terminal 将 `ANTHROPIC_API_KEY` 加入 tmux `update-environment`，确保长期运行的 tmux Server 为新 Session 注入 daemon 当前的 API Key，而不在命令行、数据库或普通配置中暴露密钥值。
+
 ## [0.4.2] - 2026-09-22
 
 ### Added

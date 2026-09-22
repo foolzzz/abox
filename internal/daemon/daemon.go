@@ -117,7 +117,10 @@ func New(config Config) (*Daemon, error) {
 			binary             string
 			staticApprovalMode string
 		}{
-			adapter:            clauderuntime.New(clauderuntime.WithBinary(config.ClaudeBinary)),
+			adapter: clauderuntime.New(
+				clauderuntime.WithBinary(config.ClaudeBinary),
+				clauderuntime.WithAutoCompleteOnboarding(true),
+			),
 			binary:             config.ClaudeBinary,
 			staticApprovalMode: claudePolicy.Mode,
 		})

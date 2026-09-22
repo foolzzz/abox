@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -29,22 +30,24 @@ const (
 type Option func(*Adapter)
 
 type Adapter struct {
-	binary          string
-	maxMessageBytes int
-	stderrBytes     int
-	eventBuffer     int
-	stopGrace       time.Duration
+	binary                 string
+	maxMessageBytes        int
+	stderrBytes            int
+	eventBuffer            int
+	stopGrace              time.Duration
+	autoCompleteOnboarding bool
 }
 
 var _ runtimeapi.Adapter = (*Adapter)(nil)
 
 func New(options ...Option) *Adapter {
 	a := &Adapter{
-		binary:          defaultBinary,
-		maxMessageBytes: defaultMaxMessageBytes,
-		stderrBytes:     defaultStderrBytes,
-		eventBuffer:     defaultEventBuffer,
-		stopGrace:       defaultStopGrace,
+		binary:                 defaultBinary,
+		maxMessageBytes:        defaultMaxMessageBytes,
+		stderrBytes:            defaultStderrBytes,
+		eventBuffer:            defaultEventBuffer,
+		stopGrace:              defaultStopGrace,
+		autoCompleteOnboarding: false,
 	}
 	for _, option := range options {
 		if option != nil {
@@ -59,6 +62,12 @@ func WithBinary(binary string) Option {
 		if strings.TrimSpace(binary) != "" {
 			a.binary = binary
 		}
+	}
+}
+
+func WithAutoCompleteOnboarding(enabled bool) Option {
+	return func(a *Adapter) {
+		a.autoCompleteOnboarding = enabled
 	}
 }
 
@@ -109,7 +118,44 @@ func (a *Adapter) Probe(ctx context.Context) (string, runtimeapi.Capabilities, e
 			Detail:    version,
 		}
 	}
+	status, statusErr := a.probeAuthentication(ctx)
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if statusErr != nil && strings.TrimSpace(apiKey) == "" {
+		return version, capabilities(), statusErr
+	}
+	if !claudeAuthenticated(status, apiKey) {
+		return version, capabilities(), &OperationError{Operation: "probe authentication", Cause: ErrAuthenticationRequired, Detail: "run claude auth login or configure ANTHROPIC_API_KEY"}
+	}
+	if a.autoCompleteOnboarding {
+		configDirectory := strings.TrimSpace(status.ConfigDirectory)
+		if configDirectory == "" {
+			home, homeErr := os.UserHomeDir()
+			if homeErr != nil {
+				return version, capabilities(), &OperationError{Operation: "resolve config directory", Cause: homeErr}
+			}
+			configDirectory = filepath.Join(home, ".claude")
+		}
+		if _, err := completeClaudeOnboarding(configDirectory, version); err != nil {
+			return version, capabilities(), &OperationError{Operation: "complete onboarding", Cause: err}
+		}
+	}
 	return version, capabilities(), nil
+}
+
+func (a *Adapter) probeAuthentication(ctx context.Context) (authStatus, error) {
+	cmd := exec.CommandContext(ctx, a.binary, "auth", "status", "--json")
+	output, err := cmd.CombinedOutput()
+	var status authStatus
+	if decodeErr := json.Unmarshal(output, &status); decodeErr != nil {
+		if err != nil {
+			return status, &OperationError{Operation: "probe authentication", Cause: err}
+		}
+		return status, &OperationError{Operation: "probe authentication", Cause: decodeErr}
+	}
+	if err != nil {
+		return status, &OperationError{Operation: "probe authentication", Cause: err}
+	}
+	return status, nil
 }
 
 func capabilities() runtimeapi.Capabilities {

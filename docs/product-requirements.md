@@ -219,6 +219,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] OMP 使用 Host 当前系统认证完成真实调用。
 - [x] Codex 使用 Host 当前系统认证完成真实调用并保持多轮 Thread。
 - [x] Claude Code 使用 Host 当前系统认证完成真实调用。
+- [x] Claude Host 同时支持 OAuth/Keychain 登录和 daemon 环境中的 `ANTHROPIC_API_KEY`；认证成功但交互 Onboarding 未完成时，由 daemon 备份并原子补齐标记，避免每台 Host 重复登录。
 - [x] OMP 的 Prompt、Steer、Follow-up、Interrupt、Stop、Resume、Subagent、Todo 与 Tool Event 实测通过。
 - [x] Approval Reaper 和后台 Approval 状态机保留，但 Web 不提供独立审批页面。
 - [x] Agent Definition 模型作为新 Box 默认值；Box 可单独切换模型并安全重启 Runtime/tmux。
