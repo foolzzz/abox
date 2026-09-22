@@ -56,7 +56,7 @@ func completeClaudeOnboarding(configDirectory, version string) (bool, error) {
 		return false, fmt.Errorf("encode Claude config: %w", err)
 	}
 	if len(encoded) > maxClaudeConfigBytes {
-		return false, errors.New("Claude config exceeds size limit")
+		return false, errors.New("claude config exceeds size limit")
 	}
 	encoded = append(encoded, '\n')
 	if len(original) > 0 {
@@ -81,10 +81,10 @@ func readClaudeConfig(path string) ([]byte, error) {
 		return nil, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New("Claude config must not be a symbolic link")
+		return nil, errors.New("claude config must not be a symbolic link")
 	}
 	if info.Size() > maxClaudeConfigBytes {
-		return nil, errors.New("Claude config exceeds size limit")
+		return nil, errors.New("claude config exceeds size limit")
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -96,7 +96,7 @@ func readClaudeConfig(path string) ([]byte, error) {
 		return nil, fmt.Errorf("read Claude config: %w", err)
 	}
 	if len(content) > maxClaudeConfigBytes {
-		return nil, errors.New("Claude config exceeds size limit")
+		return nil, errors.New("claude config exceeds size limit")
 	}
 	return content, nil
 }
