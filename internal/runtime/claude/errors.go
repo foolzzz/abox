@@ -12,6 +12,7 @@ var (
 	ErrTurnQueued                     = errors.New("claude: a follow-up turn is already queued")
 	ErrUnsupportedInput               = errors.New("claude: unsupported input kind")
 	ErrInteractiveApprovalUnsupported = errors.New("claude: interactive approvals are unsupported")
+	ErrAuthenticationRequired         = errors.New("claude: authentication is required")
 )
 
 type ProtocolError struct {

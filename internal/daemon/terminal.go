@@ -181,6 +181,11 @@ func (m *TerminalManager) terminalCommand(ctx context.Context, input *hostv1.Ter
 }
 
 func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, workspace, runtimeType, model string) error {
+	if runtimeType == "claude" {
+		if err := m.ensureTmuxUpdateEnvironment(ctx, "ANTHROPIC_API_KEY"); err != nil {
+			return err
+		}
+	}
 	if m.tmuxSessionExists(ctx, sessionName) {
 		return nil
 	}
@@ -210,6 +215,40 @@ func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, w
 	_ = exec.CommandContext(ctx, m.tmuxBinary, "set-option", "-t", "="+sessionName, "history-limit", "50000").Run()
 	_ = exec.CommandContext(ctx, m.tmuxBinary, "set-option", "-t", "="+sessionName, "mouse", "on").Run()
 	return nil
+}
+
+func (m *TerminalManager) ensureTmuxUpdateEnvironment(ctx context.Context, names ...string) error {
+	output, err := exec.CommandContext(ctx, m.tmuxBinary, "show-options", "-gv", "update-environment").Output()
+	if err != nil {
+		// With no tmux server, the first new-session inherits the daemon environment directly.
+		return nil
+	}
+	updated := strings.Fields(string(output))
+	changed := false
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || containsString(updated, name) {
+			continue
+		}
+		updated = append(updated, name)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	if output, err := exec.CommandContext(ctx, m.tmuxBinary, "set-option", "-g", "update-environment", strings.Join(updated, " ")).CombinedOutput(); err != nil {
+		return fmt.Errorf("configure tmux environment: %w: %s", err, boundedTerminalOutput(output))
+	}
+	return nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *TerminalManager) tmuxSessionExists(ctx context.Context, sessionName string) bool {
