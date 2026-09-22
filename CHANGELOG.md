@@ -9,6 +9,11 @@
 ### Added
 
 - 新增统一的版本更新记录文件。
+- Agent Box 列表支持权限安全的多选和批量删除；成功项立即移除，失败项保留选择并显示逐项错误。
+
+### Fixed
+
+- Control Plane 重启后通过 gRPC keepalive 和主动连接唤醒加速 daemon 重连，避免 OMP、Codex、Claude 在 Agent 创建页面长期显示为不可用。
 
 ## [0.4.1] - 2026-09-21
 

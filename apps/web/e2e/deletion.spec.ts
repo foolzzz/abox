@@ -19,6 +19,41 @@ test("Box delete control stays visible and surfaces backend conflicts in its mod
   expect(api.deletes).toEqual(["/boxes/box-owned"]);
 });
 
+test("multiple Box sessions can be selected and deleted together", async ({ page }) => {
+  const api = await installAdminApi(page);
+  await page.goto("/boxes");
+
+  await page.getByRole("checkbox", { name: "Select Owned Box", exact: true }).check();
+  await page.getByRole("checkbox", { name: "Select Second Box", exact: true }).check();
+  await page.getByRole("button", { name: "Delete selected (2)", exact: true }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Delete 2 sessions?", exact: true })).toBeVisible();
+  await expect(dialog.getByText("Owned Box", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Second Box", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Delete 2 sessions", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: "Owned Box", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Second Box", exact: true })).toHaveCount(0);
+  expect(api.deletes).toEqual(["/boxes/box-owned", "/boxes/box-second"]);
+});
+
+test("bulk Box deletion keeps failed sessions selected and reports each error", async ({ page }) => {
+  const api = await installAdminApi(page, { deleteFailures: { "/boxes/box-second": "The session is protected." } });
+  await page.goto("/boxes");
+
+  await page.getByRole("checkbox", { name: "Select all visible boxes", exact: true }).check();
+  await page.getByRole("button", { name: "Delete selected (2)", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Delete 2 sessions", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: "Owned Box", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Second Box", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("alert").first()).toHaveText("Second Box: The session is protected.");
+  await expect(page.getByRole("checkbox", { name: "Select Second Box", exact: true })).toBeChecked();
+  expect(api.deletes).toEqual(["/boxes/box-owned", "/boxes/box-second"]);
+});
+
 test("Host delete controls expose the offline prerequisite and allow offline deletion", async ({ page }) => {
   const api = await installAdminApi(page);
 
@@ -95,6 +130,7 @@ test("ordinary users do not receive administrator deletion controls", async ({ p
 
   await page.goto("/boxes");
   await expect(page.getByRole("button", { name: "Delete Owned Box", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: /^Select / })).toHaveCount(0);
 
   await page.goto("/hosts");
   await expect(page.getByRole("button", { name: /^Delete / })).toHaveCount(0);
@@ -123,4 +159,14 @@ test("Agent Box creation is one form with one submit", async ({ page }) => {
   await expect(page).toHaveURL(/\/boxes\/box-created\/agent-terminal$/);
   expect(api.workspaceCreates).toEqual([{ hostId: "host-online", name: "one-step", path: "/srv/one-step" }]);
   expect(api.boxCreates).toEqual([{ name: "One Step Box", agentId: "agent-primary", hostId: "host-online", workspaceId: "workspace-created" }]);
+});
+
+test("Agent creation shows every Runtime advertised by an online Host as available", async ({ page }) => {
+  await installAdminApi(page);
+  await page.goto("/agents?create=1");
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Define an agent", exact: true })).toBeVisible();
+  await expect(dialog.getByText("1 online host(s) available", { exact: true })).toHaveCount(3);
+  await expect(dialog.getByText("Unavailable", { exact: true })).toHaveCount(0);
 });
