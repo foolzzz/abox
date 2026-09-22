@@ -152,6 +152,7 @@ const workspaceAcl: AccessControlEntry[] = [
 interface ApiFixtureOptions {
   deleteFailures?: Record<string, string>;
   meta?: Meta;
+  hostResponses?: Host[][];
 }
 
 export interface ApiObservations {
@@ -182,6 +183,7 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
   };
   const meta = options.meta ?? adminMeta;
   let createdBox: Box | undefined;
+  let hostReadIndex = 0;
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -191,11 +193,14 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
     if (method === "GET" && path === "/meta") return json(route, meta);
     if (method === "GET" && path === "/notifications") return json(route, []);
     if (method === "GET" && path === "/agents") return json(route, agents);
-    if (method === "GET" && path === "/hosts") return json(route, hosts);
+    if (method === "GET" && path === "/hosts") {
+      const values = options.hostResponses?.[Math.min(hostReadIndex, options.hostResponses.length - 1)] ?? hosts;
+      hostReadIndex++;
+      return json(route, values);
+    }
     if (method === "GET" && path === "/workspaces") return json(route, workspaces);
     if (method === "GET" && path === "/boxes") return json(route, boxes);
     if (method === "GET" && path === "/members") return json(route, members);
-    if (method === "GET" && path === "/teams") return json(route, teams);
     if (method === "GET" && path === "/workspaces/workspace-project/acl") return json(route, workspaceAcl);
     if (method === "GET" && path === "/workspaces/workspace-project") return json(route, workspaces[0]);
     if (method === "GET" && createdBox && path === `/boxes/${createdBox.id}`) {

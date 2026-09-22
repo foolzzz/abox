@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { installAdminApi, installUserApi } from "./api-fixtures";
+import { hosts, installAdminApi, installUserApi } from "./api-fixtures";
 
 test("Box delete control stays visible and surfaces backend conflicts in its modal", async ({ page }) => {
   const api = await installAdminApi(page, {
@@ -167,6 +167,17 @@ test("Agent creation shows every Runtime advertised by an online Host as availab
 
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Define an agent", exact: true })).toBeVisible();
+  await expect(dialog.getByText("1 online host(s) available", { exact: true })).toHaveCount(3);
+  await expect(dialog.getByText("Unavailable", { exact: true })).toHaveCount(0);
+});
+
+test("open Agent creation refreshes stale Runtime availability", async ({ page }) => {
+  const offlineHosts = hosts.map((host) => ({ ...host, status: "offline" as const }));
+  await installAdminApi(page, { hostResponses: [offlineHosts, hosts] });
+  await page.goto("/agents");
+  await page.getByRole("button", { name: "New agent", exact: true }).click();
+
+  const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("1 online host(s) available", { exact: true })).toHaveCount(3);
   await expect(dialog.getByText("Unavailable", { exact: true })).toHaveCount(0);
 });

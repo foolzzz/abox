@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -79,6 +80,7 @@ func (s *HealthStatus) Connected(welcome *hostv1.Welcome) {
 	if welcome != nil {
 		s.hostID = welcome.HostId
 	}
+	slog.Info("agentboxd connected to control plane", "host_id", s.hostID)
 }
 
 func (s *HealthStatus) Disconnected(err error) {
@@ -90,6 +92,7 @@ func (s *HealthStatus) Disconnected(err error) {
 		s.lastError = summary
 		s.recordFailureLocked("server_connection", summary)
 	}
+	slog.Warn("agentboxd disconnected from control plane", "error", err)
 }
 
 func (s *HealthStatus) SetError(err error) {

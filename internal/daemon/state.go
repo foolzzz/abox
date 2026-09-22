@@ -270,14 +270,27 @@ func (s *DurableIdempotencyStore) RememberFrame(ctx context.Context, frameID str
 	if _, exists := s.state.Frames[frameID]; exists {
 		return nil
 	}
+	previousFrames := s.state.Frames
+	pruned := false
 	if len(s.state.Frames) >= s.limits.MaxFrameIDs {
-		return errors.New("server frame idempotency store is full")
+		frames := make(map[string]uint64, len(s.state.Frames))
+		for id, order := range s.state.Frames {
+			frames[id] = order
+		}
+		pruneOldestDurableFrameIDs(frames, s.state.NextOrder, s.limits.MaxFrameIDs)
+		s.state.Frames = frames
+		pruned = true
 	}
+	previousOrder := s.state.NextOrder
 	s.state.NextOrder++
 	s.state.Frames[frameID] = s.state.NextOrder
 	if err := s.saveLocked(); err != nil {
-		delete(s.state.Frames, frameID)
-		s.state.NextOrder--
+		if pruned {
+			s.state.Frames = previousFrames
+		} else {
+			delete(s.state.Frames, frameID)
+		}
+		s.state.NextOrder = previousOrder
 		return err
 	}
 	return nil
@@ -405,6 +418,22 @@ func (s *DurableIdempotencyStore) saveLocked() error {
 		return errors.New("idempotency state exceeds size limit")
 	}
 	return writeAtomic(s.path, append(encoded, '\n'), 0o600)
+}
+
+func pruneOldestDurableFrameIDs(frames map[string]uint64, nextOrder uint64, limit int) {
+	keep := limit - limit/4
+	if keep >= limit {
+		keep = limit - 1
+	}
+	cutoff := uint64(0)
+	if nextOrder > uint64(keep) {
+		cutoff = nextOrder - uint64(keep)
+	}
+	for id, order := range frames {
+		if order <= cutoff {
+			delete(frames, id)
+		}
+	}
 }
 
 func cloneCommandRecord(record hostclient.CommandRecord) hostclient.CommandRecord {

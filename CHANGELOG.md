@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-22
+
 ### Added
 
 - 新增统一的版本更新记录文件。
@@ -13,7 +15,7 @@
 
 ### Fixed
 
-- Control Plane 重启后通过 gRPC keepalive 和主动连接唤醒加速 daemon 重连，避免 OMP、Codex、Claude 在 Agent 创建页面长期显示为不可用。
+- Server Frame Idempotency Store 改为有界滚动保留，达到上限时淘汰最旧 Frame ID，修复 daemon 长期运行约 3 天后因 Store 满而每 15 秒断线、导致 OMP/Codex/Claude 显示不可用的问题；同时增加 gRPC keepalive、主动重连唤醒、连接状态日志和 Agent 创建弹窗的 Runtime 可用性自动刷新。
 
 ## [0.4.1] - 2026-09-21
 
@@ -119,7 +121,8 @@
 - Host Credential、幂等 Command、Event Journal/Ack 和 PostgreSQL 约束用于保护控制面与 daemon 通信。
 - Runtime Secret 仅引用 Host 环境，不在 Control Plane 保存明文。
 
-[Unreleased]: https://github.com/foolzzz/abox/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/foolzzz/abox/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/foolzzz/abox/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/foolzzz/abox/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/foolzzz/abox/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/foolzzz/abox/compare/v0.2.0...v0.3.0
