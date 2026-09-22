@@ -38,6 +38,10 @@ export function BoxesView() {
   const [deletingBox, setDeletingBox] = useState<Box>();
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string>();
+  const [selectedBoxIds, setSelectedBoxIds] = useState<Set<string>>(() => new Set());
+  const [batchDeletingBoxes, setBatchDeletingBoxes] = useState<Box[]>([]);
+  const [batchDeleteBusy, setBatchDeleteBusy] = useState(false);
+  const [batchDeleteErrors, setBatchDeleteErrors] = useState<string[]>([]);
 
   if (resource.loading) return <LoadingState label={t("boxes.loading")} />;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
@@ -54,6 +58,23 @@ export function BoxesView() {
     return matchesStatus && (!normalizedQuery || text.includes(normalizedQuery));
   });
   const canDeleteBox = (box: Box) => roleAtLeast(currentUser?.role, "admin") || box.ownerUserId === currentUser?.id;
+  const selectableBoxes = filtered.filter(canDeleteBox);
+  const selectedBoxes = data.boxes.filter((box) => selectedBoxIds.has(box.id) && canDeleteBox(box));
+  const allVisibleSelected = selectableBoxes.length > 0 && selectableBoxes.every((box) => selectedBoxIds.has(box.id));
+  const toggleBoxSelection = (boxId: string) => setSelectedBoxIds((current) => {
+    const next = new Set(current);
+    if (next.has(boxId)) next.delete(boxId);
+    else next.add(boxId);
+    return next;
+  });
+  const toggleVisibleSelection = () => setSelectedBoxIds((current) => {
+    const next = new Set(current);
+    for (const box of selectableBoxes) {
+      if (allVisibleSelected) next.delete(box.id);
+      else next.add(box.id);
+    }
+    return next;
+  });
   const deleteBox = async () => {
     if (!deletingBox) return;
     setDeleteBusy(true);
@@ -61,6 +82,7 @@ export function BoxesView() {
     try {
       await api.deleteBox(deletingBox.id);
       resource.setData((current) => current ? { ...current, boxes: current.boxes.filter((box) => box.id !== deletingBox.id) } : current);
+      setSelectedBoxIds((current) => { const next = new Set(current); next.delete(deletingBox.id); return next; });
       notify(t("box.deleted"));
       setDeletingBox(undefined);
     } catch (requestError) {
@@ -70,6 +92,45 @@ export function BoxesView() {
     }
   };
 
+  const openBatchDelete = () => {
+    if (selectedBoxes.length === 0) return;
+    setBatchDeleteErrors([]);
+    setBatchDeletingBoxes(selectedBoxes);
+  };
+  const closeBatchDelete = () => {
+    if (batchDeleteBusy) return;
+    setBatchDeleteErrors([]);
+    setBatchDeletingBoxes([]);
+  };
+  const batchDeleteBoxes = async () => {
+    const targets = batchDeletingBoxes;
+    if (targets.length === 0) return;
+    setBatchDeleteBusy(true);
+    setBatchDeleteErrors([]);
+    const outcomes = await Promise.all(targets.map(async (box) => {
+      try {
+        await api.deleteBox(box.id);
+        return { box, error: undefined };
+      } catch (requestError) {
+        return { box, error: errorMessage(requestError) };
+      }
+    }));
+    const deleted = outcomes.filter((outcome) => !outcome.error).map((outcome) => outcome.box);
+    const failed = outcomes.filter((outcome): outcome is { box: Box; error: string } => Boolean(outcome.error));
+    const deletedIds = new Set(deleted.map((box) => box.id));
+    if (deletedIds.size > 0) {
+      resource.setData((current) => current ? { ...current, boxes: current.boxes.filter((box) => !deletedIds.has(box.id)) } : current);
+      notify(t("boxes.bulkDeleted", { count: deletedIds.size }));
+    }
+    setSelectedBoxIds(new Set(failed.map((outcome) => outcome.box.id)));
+    setBatchDeleteBusy(false);
+    if (failed.length === 0) {
+      setBatchDeletingBoxes([]);
+      return;
+    }
+    setBatchDeletingBoxes(failed.map((outcome) => outcome.box));
+    setBatchDeleteErrors(failed.map((outcome) => `${outcome.box.name}: ${outcome.error}`));
+  };
   return (
     <div className="page">
       <PageHeader eyebrow={t("boxes.eyebrow")} title={t("boxes.title")} description={t("boxes.description")} actions={<><RefreshButton refreshing={resource.refreshing} onClick={resource.reload} />{canCreate ? <Button variant="primary" icon="plus" onClick={() => navigate("/boxes?create=1")}>{t("boxes.new")}</Button> : null}</>} />
@@ -80,12 +141,14 @@ export function BoxesView() {
           <div className="list-toolbar">
             <label className="search-field"><Icon name="search" /><span className="sr-only">{t("boxes.search")}</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("boxes.search")} /></label>
             <label className="filter-field"><span className="sr-only">Filter by status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">{t("boxes.allStatuses")}</option><option value="running">Running</option><option value="idle">Idle</option><option value="waiting_approval">Waiting approval</option><option value="hibernated">Hibernated</option><option value="error">Error</option><option value="terminated">Terminated</option></select></label>
+            {selectableBoxes.length ? <label className="box-bulk-select"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} aria-label={t("boxes.selectAll")} /><span>{t("boxes.selected", { count: selectedBoxes.length })}</span></label> : null}
+            {selectedBoxes.length ? <Button variant="danger" icon="trash" onClick={openBatchDelete}>{t("boxes.deleteSelected", { count: selectedBoxes.length })}</Button> : null}
           </div>
           {filtered.length ? (
             <section className="box-grid" aria-label="Agent boxes">
               {filtered.map((box) => (
-                <article className="box-card" key={box.id}>
-                  <div className="box-card__top"><span className="resource-icon resource-icon--box"><Icon name="box" /></span><span className="box-card__controls"><StatusChip status={box.status} compact />{canDeleteBox(box) ? <button className="box-card__delete" type="button" title={t("box.delete")} aria-label={`Delete ${box.name}`} onClick={() => { setDeleteError(undefined); setDeletingBox(box); }}><Icon name="trash" size={16} /></button> : null}</span></div>
+                <article className={selectedBoxIds.has(box.id) ? "box-card box-card--selected" : "box-card"} key={box.id}>
+                  <div className="box-card__top"><span className="resource-icon resource-icon--box"><Icon name="box" /></span><span className="box-card__controls">{canDeleteBox(box) ? <label className="box-card__select"><input type="checkbox" checked={selectedBoxIds.has(box.id)} onChange={() => toggleBoxSelection(box.id)} aria-label={t("boxes.select", { name: box.name })} /></label> : null}<StatusChip status={box.status} compact />{canDeleteBox(box) ? <button className="box-card__delete" type="button" title={t("box.delete")} aria-label={`Delete ${box.name}`} onClick={() => { setDeleteError(undefined); setDeletingBox(box); }}><Icon name="trash" size={16} /></button> : null}</span></div>
                   <Link className="box-card__main" to={`/boxes/${box.id}/agent-terminal`}>
                     <div><h2>{box.name}</h2><p>{agentNames.get(box.agentId) ?? "Unknown agent"}</p></div>
                     <dl><div><dt>Host</dt><dd>{hostNames.get(box.hostId) ?? "Unknown"}</dd></div><div><dt>Workspace</dt><dd>{workspaceNames.get(box.workspaceId) ?? "Unknown"}</dd></div></dl>
@@ -113,6 +176,14 @@ export function BoxesView() {
       />
       <Modal open={Boolean(deletingBox)} title={t("box.deleteTitle", { name: deletingBox?.name ?? "Agent Box" })} description={t("box.deleteDescription")} onClose={() => !deleteBusy && setDeletingBox(undefined)} size="small">
         <div className="confirm-dialog">{deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}<InlineAlert tone="warning">{t("box.deleteWarning")}</InlineAlert><div className="modal__actions"><Button disabled={deleteBusy} onClick={() => setDeletingBox(undefined)}>{t("common.cancel")}</Button><Button variant="danger" icon="trash" busy={deleteBusy} onClick={() => void deleteBox()}>{t("box.deleteConfirm")}</Button></div></div>
+      </Modal>
+      <Modal open={batchDeletingBoxes.length > 0} title={t("boxes.bulkDeleteTitle", { count: batchDeletingBoxes.length })} description={t("boxes.bulkDeleteDescription")} onClose={closeBatchDelete} size="small">
+        <div className="confirm-dialog">
+          {batchDeleteErrors.map((message, index) => <InlineAlert key={`${index}:${message}`}>{message}</InlineAlert>)}
+          <InlineAlert tone="warning">{t("boxes.bulkDeleteWarning")}</InlineAlert>
+          <ul className="box-bulk-delete-list">{batchDeletingBoxes.map((box) => <li key={box.id}>{box.name}</li>)}</ul>
+          <div className="modal__actions"><Button disabled={batchDeleteBusy} onClick={closeBatchDelete}>{t("common.cancel")}</Button><Button variant="danger" icon="trash" busy={batchDeleteBusy} onClick={() => void batchDeleteBoxes()}>{t("boxes.bulkDeleteConfirm", { count: batchDeletingBoxes.length })}</Button></div>
+        </div>
       </Modal>
     </div>
   );

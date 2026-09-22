@@ -109,6 +109,7 @@ type ClientConfig struct {
 	Backoff           Backoff
 	NewFrameID        FrameIDGenerator
 	Sleep             SleepFunc
+	PrepareReconnect  func()
 }
 
 type Client struct {
@@ -139,6 +140,7 @@ type Client struct {
 	backoff           Backoff
 	newFrameID        FrameIDGenerator
 	sleep             SleepFunc
+	prepareReconnect  func()
 
 	notify      chan struct{}
 	asyncErrors chan error
@@ -220,6 +222,7 @@ func NewClient(config ClientConfig) (*Client, error) {
 		backoff:           config.Backoff,
 		newFrameID:        config.NewFrameID,
 		sleep:             config.Sleep,
+		prepareReconnect:  config.PrepareReconnect,
 		notify:            make(chan struct{}, 1),
 		asyncErrors:       make(chan error, 32),
 		fatalErrors:       make(chan error, 1),
@@ -274,6 +277,9 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 		if c.observer != nil {
 			c.observer.Disconnected(err)
+		}
+		if c.prepareReconnect != nil {
+			c.prepareReconnect()
 		}
 		if connectedAt.IsZero() || time.Since(connectedAt) < c.backoff.ResetAfter {
 			if attempt < ^uint32(0) {

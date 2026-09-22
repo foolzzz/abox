@@ -6,8 +6,8 @@ const NOW = "2026-01-15T12:00:00.000Z";
 export const adminMeta: Meta = {
   serverVersion: "e2e",
   apiVersion: "v1",
-  enabledRuntimes: ["omp"],
-  runtimeModels: { omp: ["default"] },
+  enabledRuntimes: ["omp", "codex", "claude"],
+  runtimeModels: { omp: ["default"], codex: ["gpt-5.3-codex"], claude: ["claude-sonnet-4-6"] },
   currentUser: {
     id: "user-admin",
     login: "admin",
@@ -40,7 +40,7 @@ export const hosts: Host[] = [
     os: "darwin",
     arch: "arm64",
     daemonVersion: "0.1.0",
-    runtimes: ["omp"],
+    runtimes: ["omp", "codex", "claude"],
     lastSeenAt: NOW,
     maxActiveBoxes: 4
   },
@@ -78,6 +78,20 @@ export const boxes: Box[] = [
     workspaceId: "workspace-project",
     visibility: "private",
     status: "running",
+    ownerUserId: "user-admin",
+    runtimeType: "omp",
+    version: 1,
+    createdAt: NOW,
+    updatedAt: NOW
+  },
+  {
+    id: "box-second",
+    name: "Second Box",
+    agentId: "agent-primary",
+    hostId: "host-online",
+    workspaceId: "workspace-project",
+    visibility: "private",
+    status: "idle",
     ownerUserId: "user-admin",
     runtimeType: "omp",
     version: 1,

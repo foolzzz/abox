@@ -19,14 +19,19 @@ test("a new service worker activates and reloads an already controlled client", 
   const changedServiceWorker = `${originalServiceWorker}\n// playwright-update-${Date.now()}\n`;
 
   try {
-    const reload = page.waitForNavigation({ waitUntil: "domcontentloaded" });
+    const previousTimeOrigin = await page.evaluate(() => performance.timeOrigin);
     await writeFile(serviceWorkerPath, changedServiceWorker);
     await page.evaluate(async () => {
       const registration = await navigator.serviceWorker.getRegistration();
       if (!registration) throw new Error("service worker registration is missing");
       await registration.update();
+    }).catch((error: unknown) => {
+      if (!(error instanceof Error) || !/execution context|navigation|destroyed/i.test(error.message)) throw error;
     });
-    await reload;
+    await expect.poll(async () => {
+      try { return await page.evaluate(() => performance.timeOrigin); }
+      catch { return previousTimeOrigin; }
+    }, { timeout: 15_000 }).not.toBe(previousTimeOrigin);
 
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     const navigationType = await page.evaluate(() => {

@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 type Daemon struct {
@@ -181,7 +182,11 @@ func New(config Config) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
-	connection, err := grpc.NewClient(target, grpc.WithTransportCredentials(transportCredentials))
+	connection, err := grpc.NewClient(
+		target,
+		grpc.WithTransportCredentials(transportCredentials),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 10 * time.Second, Timeout: 3 * time.Second, PermitWithoutStream: true}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create server connection: %w", err)
 	}
@@ -226,6 +231,10 @@ func New(config Config) (*Daemon, error) {
 		WorkspaceRoots:    workspaceRoots,
 		HeartbeatInterval: config.HeartbeatInterval,
 		Backoff:           hostclient.DefaultBackoff(),
+		PrepareReconnect: func() {
+			connection.ResetConnectBackoff()
+			connection.Connect()
+		},
 	})
 	if err != nil {
 		return nil, err
