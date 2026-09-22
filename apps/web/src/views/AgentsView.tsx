@@ -34,6 +34,13 @@ export function AgentsView() {
   const [deleteError, setDeleteError] = useState<string>();
   const runtimeTypes = meta ? meta.enabledRuntimes : DEFAULT_RUNTIME_TYPES;
 
+  useEffect(() => {
+    if (!createOpen) return;
+    resource.reload();
+    const refresh = window.setInterval(resource.reload, 5_000);
+    return () => window.clearInterval(refresh);
+  }, [createOpen, resource.reload]);
+
   if (resource.loading) return <LoadingState label={t("agents.load")} />;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
 
