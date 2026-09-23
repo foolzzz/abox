@@ -208,6 +208,32 @@ test("duplicate Claude session references can be resumed by multiple Boxes", asy
   ]);
 });
 
+test("session picker reuses a registered Workspace before creating a resumed Box", async ({ page }) => {
+  const api = await installAdminApi(page);
+  const sessionRef = "11111111-1111-4111-8111-111111111111";
+  await page.goto("/boxes?create=1");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("combobox").first().selectOption("agent-claude");
+  await dialog.getByRole("radio", { name: "Resume an existing session", exact: true }).check();
+  await dialog.getByRole("button", { name: "Choose session Project Session", exact: true }).click();
+  await expect(dialog.getByRole("radio", { name: "Choose registered directory", exact: true })).toBeChecked();
+  await expect(dialog.getByRole("combobox").last()).toHaveValue("workspace-project");
+  await expect(dialog.getByText("Owner", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Validation", { exact: true })).toHaveCount(0);
+  await dialog.getByLabel("Box name").fill("Resume Registered Workspace");
+  await dialog.getByRole("button", { name: "Create box", exact: true }).click();
+  await expect(page).toHaveURL(/\/boxes\/box-created\/agent-terminal$/);
+  expect(api.workspaceCreates).toEqual([]);
+  expect(api.boxCreates.at(-1)).toEqual({
+    name: "Resume Registered Workspace",
+    agentId: "agent-claude",
+    hostId: "host-online",
+    workspaceId: "workspace-project",
+    runtimeSessionMode: "resume",
+    runtimeSessionRef: sessionRef
+  });
+});
+
 test("running Claude session selection submits attach mode and reference", async ({ page }) => {
   const api = await installAdminApi(page);
   const sessionRef = "22222222-2222-4222-8222-222222222222";
@@ -217,6 +243,7 @@ test("running Claude session selection submits attach mode and reference", async
   await dialog.getByRole("radio", { name: "Attach running session", exact: true }).check();
   await dialog.getByRole("button", { name: "Choose session Other Session", exact: true }).click();
   await expect(dialog.getByLabel("Claude session ID", { exact: true })).toHaveValue(sessionRef);
+  await expect(dialog.getByText("Validate On Create", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("radio", { name: "Attach running session", exact: true })).toBeChecked();
   await dialog.getByLabel("Box name").fill("Attach Claude");
   await dialog.getByRole("button", { name: "Create box", exact: true }).click();
@@ -263,7 +290,7 @@ test("Agent creation hides System Prompt and prefills Runtime model defaults", a
   expect(api.agentCreates).toEqual([{ name: "Default Claude Agent", runtimeType: "claude", model: "claude-opus-4-6", systemPrompt: "" }]);
 });
 
-test("Claude session picker searches local sessions and maps the Workspace path", async ({ page }) => {
+test("Claude session picker searches local sessions and reuses the registered Workspace", async ({ page }) => {
   await installAdminApi(page);
   await page.goto("/boxes?create=1");
   const dialog = page.getByRole("dialog");
@@ -280,7 +307,8 @@ test("Claude session picker searches local sessions and maps the Workspace path"
   await dialog.getByRole("button", { name: "Choose session Project Session", exact: true }).click();
   await expect(dialog.getByRole("radio", { name: "Resume an existing session", exact: true })).toBeChecked();
   await expect(dialog.getByLabel("Claude session ID", { exact: true })).toHaveValue("11111111-1111-4111-8111-111111111111");
-  await expect(dialog.getByLabel("Local project directory")).toHaveValue("/srv/project");
+  await expect(dialog.getByRole("radio", { name: "Choose registered directory", exact: true })).toBeChecked();
+  await expect(dialog.getByRole("combobox").last()).toHaveValue("workspace-project");
 });
 
 test("Claude session discovery failure preserves manual Session ID fallback", async ({ page }) => {

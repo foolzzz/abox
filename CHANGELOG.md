@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-23
+
+### Fixed
+
+- 从 Session Picker 恢复 Claude 会话时优先复用已注册且 Ready 的 Workspace，不再回退到不必要的路径验证状态；未注册路径明确显示“创建时验证”，创建按钮可直接触发验证和 Box 创建。
+
 ## [0.8.1] - 2026-09-23
 
 ### Fixed
@@ -190,7 +196,8 @@
 - Host Credential、幂等 Command、Event Journal/Ack 和 PostgreSQL 约束用于保护控制面与 daemon 通信。
 - Runtime Secret 仅引用 Host 环境，不在 Control Plane 保存明文。
 
-[Unreleased]: https://github.com/foolzzz/abox/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/foolzzz/abox/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/foolzzz/abox/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/foolzzz/abox/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/foolzzz/abox/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/foolzzz/abox/compare/v0.7.0...v0.7.1

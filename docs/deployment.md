@@ -1,6 +1,6 @@
 # AgentBox 部署指南
 
-本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.8.1`。
+本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.8.2`。
 
 ## 1. 部署拓扑
 
@@ -76,16 +76,16 @@ claude --version
 Release 页面：
 
 ```text
-https://github.com/foolzzz/abox/releases/tag/v0.8.1
+https://github.com/foolzzz/abox/releases/tag/v0.8.2
 ```
 
 根据操作系统和架构下载：
 
 ```text
-agentbox-0.8.1-darwin-arm64.tar.gz
-agentbox-0.8.1-darwin-amd64.tar.gz
-agentbox-0.8.1-linux-arm64.tar.gz
-agentbox-0.8.1-linux-amd64.tar.gz
+agentbox-0.8.2-darwin-arm64.tar.gz
+agentbox-0.8.2-darwin-amd64.tar.gz
+agentbox-0.8.2-linux-arm64.tar.gz
+agentbox-0.8.2-linux-amd64.tar.gz
 checksums.txt
 ```
 
@@ -94,13 +94,13 @@ checksums.txt
 macOS：
 
 ```bash
-shasum -a 256 agentbox-0.8.1-darwin-arm64.tar.gz
+shasum -a 256 agentbox-0.8.2-darwin-arm64.tar.gz
 ```
 
 Linux：
 
 ```bash
-sha256sum agentbox-0.8.1-linux-amd64.tar.gz
+sha256sum agentbox-0.8.2-linux-amd64.tar.gz
 ```
 
 输出必须与 `checksums.txt` 中对应文件一致。
@@ -108,8 +108,8 @@ sha256sum agentbox-0.8.1-linux-amd64.tar.gz
 解压：
 
 ```bash
-tar -xzf agentbox-0.8.1-<os>-<arch>.tar.gz
-cd agentbox-0.8.1-<os>-<arch>
+tar -xzf agentbox-0.8.2-<os>-<arch>.tar.gz
+cd agentbox-0.8.2-<os>-<arch>
 ```
 
 ## 4. 安装文件
@@ -191,7 +191,7 @@ docker exec agentbox-postgres pg_isready -U agentbox -d agentbox
   "publicUrl": "http://127.0.0.1:8080",
   "enrollmentToken": "<random-enrollment-token>",
   "webDir": "~/.agentbox/web",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "approvalPollInterval": "1s",
   "hibernationPollInterval": "30s",
   "schedulePollInterval": "1s",
