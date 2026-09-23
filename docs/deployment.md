@@ -1,6 +1,6 @@
 # AgentBox 部署指南
 
-本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.7.0`。
+本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.7.1`。
 
 ## 1. 部署拓扑
 
@@ -44,6 +44,8 @@ agentbox-server ─── PostgreSQL
 
 当前默认传输是 HTTP、WebSocket 和明文 gRPC。跨主机部署必须放在可信内网、VPN 或 Tailnet 中，并通过防火墙限制 `9443` 的访问来源；不要直接暴露到公网。
 
+Web Console 核心功能支持受信网络中的 HTTP 访问。前端不依赖 `crypto.randomUUID()` 等仅限 Secure Context 的 API；若浏览器缺失该 API，会自动回退。浏览器通常不会在远程 HTTP Origin 上启用 Service Worker/PWA 离线缓存，因此生产环境仍推荐 HTTPS；使用 HTTP 时应依赖 Tailnet/VPN 和网络 ACL。
+
 ## 2. 支持的平台
 
 正式 Release 提供：
@@ -72,16 +74,16 @@ claude --version
 Release 页面：
 
 ```text
-https://github.com/foolzzz/abox/releases/tag/v0.7.0
+https://github.com/foolzzz/abox/releases/tag/v0.7.1
 ```
 
 根据操作系统和架构下载：
 
 ```text
-agentbox-0.7.0-darwin-arm64.tar.gz
-agentbox-0.7.0-darwin-amd64.tar.gz
-agentbox-0.7.0-linux-arm64.tar.gz
-agentbox-0.7.0-linux-amd64.tar.gz
+agentbox-0.7.1-darwin-arm64.tar.gz
+agentbox-0.7.1-darwin-amd64.tar.gz
+agentbox-0.7.1-linux-arm64.tar.gz
+agentbox-0.7.1-linux-amd64.tar.gz
 checksums.txt
 ```
 
@@ -90,13 +92,13 @@ checksums.txt
 macOS：
 
 ```bash
-shasum -a 256 agentbox-0.7.0-darwin-arm64.tar.gz
+shasum -a 256 agentbox-0.7.1-darwin-arm64.tar.gz
 ```
 
 Linux：
 
 ```bash
-sha256sum agentbox-0.7.0-linux-amd64.tar.gz
+sha256sum agentbox-0.7.1-linux-amd64.tar.gz
 ```
 
 输出必须与 `checksums.txt` 中对应文件一致。
@@ -104,8 +106,8 @@ sha256sum agentbox-0.7.0-linux-amd64.tar.gz
 解压：
 
 ```bash
-tar -xzf agentbox-0.7.0-<os>-<arch>.tar.gz
-cd agentbox-0.7.0-<os>-<arch>
+tar -xzf agentbox-0.7.1-<os>-<arch>.tar.gz
+cd agentbox-0.7.1-<os>-<arch>
 ```
 
 ## 4. 安装文件
@@ -187,7 +189,7 @@ docker exec agentbox-postgres pg_isready -U agentbox -d agentbox
   "publicUrl": "http://127.0.0.1:8080",
   "enrollmentToken": "<random-enrollment-token>",
   "webDir": "~/.agentbox/web",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "approvalPollInterval": "1s",
   "hibernationPollInterval": "30s",
   "schedulePollInterval": "1s",

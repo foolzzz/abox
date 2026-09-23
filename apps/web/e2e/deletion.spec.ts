@@ -280,6 +280,17 @@ test("Agent creation shows every Runtime advertised by an online Host as availab
   await expect(dialog.getByText("Unavailable", { exact: true })).toHaveCount(0);
 });
 
+test("notifications work when HTTP context has no crypto.randomUUID", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, "randomUUID", { value: undefined, configurable: true });
+  });
+  await installAdminApi(page);
+  await page.goto("/agents");
+  await page.getByRole("button", { name: "Delete Primary Agent", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete Agent", exact: true }).click();
+  await expect(page.getByLabel("Notifications").getByText("Primary Agent was deleted.", { exact: true })).toBeVisible();
+});
+
 test("open Agent creation refreshes stale Runtime availability", async ({ page }) => {
   const offlineHosts = hosts.map((host) => ({ ...host, status: "offline" as const }));
   await installAdminApi(page, { hostResponses: [offlineHosts, hosts] });

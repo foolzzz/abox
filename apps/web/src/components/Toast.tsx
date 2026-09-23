@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { browserUUID } from "../lib/uuid";
 import { Icon } from "./Icon";
 
 interface ToastItem {
@@ -16,7 +17,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const notify = useCallback((message: string, tone: ToastItem["tone"] = "success") => {
-    const id = crypto.randomUUID();
+    const id = browserUUID();
     setItems((current) => [...current, { id, tone, message }]);
     window.setTimeout(() => setItems((current) => current.filter((item) => item.id !== id)), 4_500);
   }, []);
