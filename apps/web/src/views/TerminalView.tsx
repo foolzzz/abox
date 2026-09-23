@@ -47,6 +47,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
   const [settingsError, setSettingsError] = useState<string>();
   const [visibilityBusy, setVisibilityBusy] = useState(false);
   const [sessionCopied, setSessionCopied] = useState(false);
+  const [widescreen, setWidescreen] = useState(false);
   const context = useResource(async (signal) => {
     const [box, hosts, workspaces] = await Promise.all([api.getBox(boxId, signal), api.listHosts(signal), api.listWorkspaces(signal)]);
     return {
@@ -160,6 +161,22 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
     };
   }, [boxId, connectionGeneration, isAgentTerminal, t]);
 
+  useEffect(() => {
+    document.body.classList.toggle("terminal-widescreen-active", widescreen);
+    if (!widescreen) return;
+    const exitOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setWidescreen(false);
+    };
+    window.addEventListener("keydown", exitOnEscape, true);
+    return () => {
+      document.body.classList.remove("terminal-widescreen-active");
+      window.removeEventListener("keydown", exitOnEscape, true);
+    };
+  }, [widescreen]);
+
   const sendKey = (data: string) => {
     const socket = socketRef.current;
     if (socket?.readyState === WebSocket.OPEN) {
@@ -232,7 +249,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
   };
 
   return (
-    <div className="page terminal-page">
+    <div className={widescreen ? "page terminal-page terminal-page--wide" : "page terminal-page"}>
       <header className="page-heading terminal-heading">
         <div>
           <Link className="back-link" to="/boxes">{t("nav.boxes")}</Link>
@@ -255,7 +272,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
       {deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}
       {settingsError ? <InlineAlert>{settingsError}</InlineAlert> : null}
       <section className="terminal-surface" aria-label={t(isAgentTerminal ? "terminal.agentAria" : "terminal.commandAria")} ref={surface}>
-        <div className="terminal-toolbar"><label><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleSearchKey} placeholder={t("terminal.search")} /></label><button type="button" onClick={searchTerminal}>{t("terminal.findNext")}</button></div>
+        <div className="terminal-toolbar"><label><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleSearchKey} placeholder={t("terminal.search")} /></label><button type="button" onClick={searchTerminal}>{t("terminal.findNext")}</button><button type="button" aria-pressed={widescreen} onClick={() => setWidescreen((value) => !value)}><Icon name="expand" size={14} />{t(widescreen ? "terminal.exitWidescreen" : "terminal.widescreen")}</button></div>
         <div className="terminal-container" ref={container} />
         <div className="terminal-mobile-keys" aria-label={t("terminal.mobileKeys")}><button type="button" onClick={() => sendKey("\x02")}>Ctrl-B</button><button type="button" onClick={() => sendKey("\x03")}>Ctrl-C</button><button type="button" onClick={() => sendKey("\x1b")}>Esc</button><button type="button" onClick={() => sendKey("\t")}>Tab</button><button type="button" onClick={() => sendKey("\x1b[A")}>↑</button><button type="button" onClick={() => sendKey("\x1b[B")}>↓</button><button type="button" onClick={() => sendKey("\x1b[D")}>←</button><button type="button" onClick={() => sendKey("\x1b[C")}>→</button></div>
       </section>

@@ -202,6 +202,7 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
     if (method === "GET" && path === "/boxes") return json(route, boxes);
     if (method === "GET" && path === "/members") return json(route, members);
     if (method === "GET" && path === "/workspaces/workspace-project/acl") return json(route, workspaceAcl);
+    if (method === "GET" && path === "/boxes/box-owned") return json(route, { ...boxes[0], lastEventSeq: 0, activeRunId: null, run: null });
     if (method === "GET" && path === "/workspaces/workspace-project") return json(route, workspaces[0]);
     if (method === "GET" && createdBox && path === `/boxes/${createdBox.id}`) {
       return json(route, { ...createdBox, lastEventSeq: 0, activeRunId: null, run: null });

@@ -49,6 +49,16 @@ test("deletion controls are visible on every managed resource surface", async ({
   });
 
   const liveBoxes = liveSetup.boxes;
+  await page.goto(`/boxes/${liveBoxes[0].id}/agent-terminal`);
+  await page.getByRole("button", { name: "Widescreen", exact: true }).click();
+  const wideMetrics = await page.locator(".terminal-page").evaluate((element) => {
+    const rectangle = element.getBoundingClientRect();
+    return { top: rectangle.top, left: rectangle.left, width: rectangle.width, height: rectangle.height, viewportWidth: innerWidth, viewportHeight: innerHeight };
+  });
+  expect(wideMetrics).toEqual({ top: 0, left: 0, width: wideMetrics.viewportWidth, height: wideMetrics.viewportHeight, viewportWidth: wideMetrics.viewportWidth, viewportHeight: wideMetrics.viewportHeight });
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Widescreen", exact: true })).toBeVisible();
+
   await page.goto("/boxes");
 
   for (const box of liveBoxes) {

@@ -142,7 +142,7 @@ test("ordinary users do not receive administrator deletion controls", async ({ p
   await expect(page.getByRole("button", { name: "Delete Project Workspace", exact: true })).toHaveCount(0);
 });
 
-test("Agent Box creation is one form with one submit", async ({ page }) => {
+test("Agent Box creation auto-registers an unregistered path in one submit", async ({ page }) => {
   const api = await installAdminApi(page);
 
   await page.goto("/boxes?create=1");
@@ -180,4 +180,28 @@ test("open Agent creation refreshes stale Runtime availability", async ({ page }
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("1 online host(s) available", { exact: true })).toHaveCount(3);
   await expect(dialog.getByText("Unavailable", { exact: true })).toHaveCount(0);
+});
+
+test("Terminal widescreen fills the browser page and exits without Fullscreen API", async ({ page }) => {
+  await installAdminApi(page);
+  await page.goto("/boxes/box-owned/agent-terminal");
+
+  const widescreen = page.getByRole("button", { name: "Widescreen", exact: true });
+  await expect(widescreen).toBeVisible();
+  await widescreen.click();
+  await expect(page.getByRole("button", { name: "Exit widescreen", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Agent Terminal", exact: true })).toBeHidden();
+  const dimensions = await page.locator(".terminal-page").evaluate((element) => {
+    const rectangle = element.getBoundingClientRect();
+    return { top: rectangle.top, left: rectangle.left, width: rectangle.width, height: rectangle.height, viewportWidth: innerWidth, viewportHeight: innerHeight };
+  });
+  expect(dimensions.top).toBe(0);
+  expect(dimensions.left).toBe(0);
+  expect(dimensions.width).toBe(dimensions.viewportWidth);
+  expect(dimensions.height).toBe(dimensions.viewportHeight);
+  expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Widescreen", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Agent Terminal", exact: true })).toBeVisible();
 });
