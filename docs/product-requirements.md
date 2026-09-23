@@ -279,6 +279,8 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] Command Terminal 保持临时 PTY 语义。
 - [x] 删除 Box 会从列表隐藏 Session，并终止 Managed Runtime 和 tmux Agent Terminal。
 - [x] Agent Terminal 和 Command Terminal 支持浏览器页面内宽屏模式：覆盖应用侧栏和页面标题但不调用浏览器 Fullscreen API，可通过工具栏按钮或 `Esc` 退出，并自动重新计算 PTY 行列数。
+- [x] Agent Terminal 使用 Visual Viewport 动态高度、Safe Area 和容器 ResizeObserver 适配手机软键盘、横竖屏、平板和桌面窗口变化；终端尺寸变化自动同步 PTY 行列。
+- [x] 手机 Terminal 提供最小 44px 的 Ctrl-B、Ctrl-C、Esc、Tab 和方向快捷键；终端字号可在 10–24px 调节并按浏览器持久化。
 - [x] Admin 新建 Box 时填写 Host 本地路径；若该 Host 尚未注册此路径，Web 自动创建并等待 Workspace 验证成功，再使用新 Workspace 创建 Box；已注册路径直接复用。
 - [x] Claude Box 可选择新会话或手动填写 Claude Session UUID 恢复历史对话；允许多个 Box 使用相同 Session Ref，Box 删除不删除 Claude 历史。
 - [x] Admin 选择 Claude Resume 时可从所选 Host 搜索本地 Session；选择结果自动填充 Session UUID 和 Workspace 路径，发现失败时保留手动输入。
@@ -299,7 +301,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] **一步创建 Agent Box**：创建页在同一表单中同时提供名称、Agent、目标 Host、项目目录/Workspace，并且仅有一次提交动作；不存在分步器，成功提交后创建完整绑定的 Box。
 - [x] **PWA 更新激活**：新 Web 构建发布后，已打开或再次访问的 PWA 客户端自动激活等待中的 Service Worker，并自动重新加载到最新构建，无需用户手动清缓存或关闭全部标签页。
 - [x] **Runtime 可用性恢复**：Server Frame Idempotency Store 采用有界滚动保留，不因长期心跳耗尽容量；Control Plane 重启后 daemon 通过 gRPC keepalive 和主动重连恢复连接；Agent 创建弹窗打开期间自动刷新 Host Runtime 状态，在线 Host 的 OMP、Codex、Claude 在 E2E 等待预算内重新显示为可用。
-- [x] **浏览器 E2E 回归覆盖**：真实 Chrome 覆盖 Box Owner 筛选、Claude Resume/Discovery/Shared Attach、Box Detach、Admin 全局 Stop、Host 级联删除、Agent 默认模型、Workspace 自动注册、Terminal 宽屏、Runtime/PWA 和远程 HTTP `randomUUID` 兼容回退；隔离 Fixture Suite 共 21 项通过，本机部署 Suite 共 6 项通过。
+- [x] **浏览器 E2E 回归覆盖**：真实 Chrome 覆盖 Box Owner 筛选、Claude Resume/Discovery/Shared Attach、Box Detach、Admin 全局 Stop、Host 级联删除、Agent 默认模型、Workspace 自动注册、Terminal 宽屏及 390px 手机/640px 动态视口/768px 平板适配、Runtime/PWA 和远程 HTTP `randomUUID` 兼容回退；隔离 Fixture Suite 共 22 项通过，本机部署 Suite 共 6 项通过。
 - [x] Web Console 在远程 HTTP/Insecure Context 中不依赖 `crypto.randomUUID()`；缺失时使用兼容 UUID 生成器，通知和其他 UI 操作保持可用。
 
 

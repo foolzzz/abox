@@ -24,15 +24,35 @@ interface TerminalServerMessage {
   error?: string;
 }
 
+const TERMINAL_FONT_SIZE_KEY = "agentbox.terminal.fontSize";
+const DEFAULT_TERMINAL_FONT_SIZE = 13;
+const MIN_TERMINAL_FONT_SIZE = 10;
+const MAX_TERMINAL_FONT_SIZE = 24;
+
+function clampTerminalFontSize(value: number): number {
+  return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, Math.round(value)));
+}
+
+function initialTerminalFontSize(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(TERMINAL_FONT_SIZE_KEY));
+    return Number.isFinite(stored) && stored > 0 ? clampTerminalFontSize(stored) : DEFAULT_TERMINAL_FONT_SIZE;
+  } catch {
+    return DEFAULT_TERMINAL_FONT_SIZE;
+  }
+}
+
 export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "command" }) {
   const { t } = useI18n();
   const { currentUser, meta } = useAccess();
   const { notify } = useToast();
   const isAgentTerminal = mode === "agent";
+  const page = useRef<HTMLDivElement>(null);
   const container = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLElement>(null);
   const socketRef = useRef<WebSocket>();
   const terminalRef = useRef<Terminal>();
+  const fitAddonRef = useRef<FitAddon>();
   const searchAddonRef = useRef<SearchAddon>();
   const [status, setStatus] = useState<"connecting" | "connected" | "closed" | "error">("connecting");
   const [error, setError] = useState<string>();
@@ -48,6 +68,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
   const [visibilityBusy, setVisibilityBusy] = useState(false);
   const [sessionCopied, setSessionCopied] = useState(false);
   const [widescreen, setWidescreen] = useState(false);
+  const [fontSize, setFontSize] = useState(initialTerminalFontSize);
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
   const [sessionActionError, setSessionActionError] = useState<string>();
   const context = useResource(async (signal) => {
@@ -61,6 +82,29 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
   const attachments = useResource<RuntimeSessionAttachment[]>((signal) => api.listRuntimeSessionAttachments(boxId, signal), [boxId]);
 
   useEffect(() => {
+    const element = page.current;
+    if (!element) return;
+    const visualViewport = window.visualViewport;
+    const updateViewport = () => {
+      const height = visualViewport?.height ?? window.innerHeight;
+      const width = visualViewport?.width ?? window.innerWidth;
+      element.style.setProperty("--terminal-viewport-height", `${Math.round(height)}px`);
+      element.style.setProperty("--terminal-viewport-width", `${Math.round(width)}px`);
+      element.style.setProperty("--terminal-viewport-top", `${Math.round(visualViewport?.offsetTop ?? 0)}px`);
+      element.style.setProperty("--terminal-viewport-left", `${Math.round(visualViewport?.offsetLeft ?? 0)}px`);
+    };
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    visualViewport?.addEventListener("resize", updateViewport);
+    visualViewport?.addEventListener("scroll", updateViewport);
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+      visualViewport?.removeEventListener("resize", updateViewport);
+      visualViewport?.removeEventListener("scroll", updateViewport);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!container.current) return;
     setStatus("connecting");
     setError(undefined);
@@ -68,7 +112,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
       cursorBlink: false,
       convertEol: true,
       fontFamily: "JetBrains Mono, SFMono-Regular, Consolas, monospace",
-      fontSize: 13,
+      fontSize,
       scrollback: 10_000,
       allowProposedApi: true,
       theme: {
@@ -99,6 +143,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
     terminal.open(container.current);
     fit.fit();
     terminalRef.current = terminal;
+    fitAddonRef.current = fit;
     searchAddonRef.current = searchAddon;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -161,8 +206,21 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
       if (socketRef.current === socket) socketRef.current = undefined;
       if (terminalRef.current === terminal) terminalRef.current = undefined;
       if (searchAddonRef.current === searchAddon) searchAddonRef.current = undefined;
+      if (fitAddonRef.current === fit) fitAddonRef.current = undefined;
     };
   }, [boxId, connectionGeneration, isAgentTerminal, t]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TERMINAL_FONT_SIZE_KEY, String(fontSize));
+    } catch {
+      // Private browsing can disable persistent storage; the current session still works.
+    }
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.fontSize = fontSize;
+    window.requestAnimationFrame(() => fitAddonRef.current?.fit());
+  }, [fontSize]);
 
   useEffect(() => {
     document.body.classList.toggle("terminal-widescreen-active", widescreen);
@@ -282,7 +340,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
   };
 
   return (
-    <div className={widescreen ? "page terminal-page terminal-page--wide" : "page terminal-page"}>
+    <div className={widescreen ? "page terminal-page terminal-page--wide" : "page terminal-page"} ref={page}>
       <header className="page-heading terminal-heading">
         <div>
           <Link className="back-link" to="/boxes">{t("nav.boxes")}</Link>
@@ -306,7 +364,16 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
       {settingsError ? <InlineAlert>{settingsError}</InlineAlert> : null}
       {sessionActionError ? <InlineAlert>{sessionActionError}</InlineAlert> : null}
       <section className="terminal-surface" aria-label={t(isAgentTerminal ? "terminal.agentAria" : "terminal.commandAria")} ref={surface}>
-        <div className="terminal-toolbar"><label><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleSearchKey} placeholder={t("terminal.search")} /></label><button type="button" onClick={searchTerminal}>{t("terminal.findNext")}</button><button type="button" aria-pressed={widescreen} onClick={() => setWidescreen((value) => !value)}><Icon name="expand" size={14} />{t(widescreen ? "terminal.exitWidescreen" : "terminal.widescreen")}</button></div>
+        <div className="terminal-toolbar">
+          <label><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleSearchKey} placeholder={t("terminal.search")} /></label>
+          <button type="button" onClick={searchTerminal}>{t("terminal.findNext")}</button>
+          <div className="terminal-font-controls" role="group" aria-label={t("terminal.fontSize")}>
+            <button type="button" aria-label={t("terminal.decreaseFontSize")} disabled={fontSize <= MIN_TERMINAL_FONT_SIZE} onClick={() => setFontSize((value) => clampTerminalFontSize(value - 1))}>−</button>
+            <output aria-live="polite">{fontSize}px</output>
+            <button type="button" aria-label={t("terminal.increaseFontSize")} disabled={fontSize >= MAX_TERMINAL_FONT_SIZE} onClick={() => setFontSize((value) => clampTerminalFontSize(value + 1))}>+</button>
+          </div>
+          <button type="button" aria-pressed={widescreen} onClick={() => setWidescreen((value) => !value)}><Icon name="expand" size={14} />{t(widescreen ? "terminal.exitWidescreen" : "terminal.widescreen")}</button>
+        </div>
         <div className="terminal-container" ref={container} />
         <div className="terminal-mobile-keys" aria-label={t("terminal.mobileKeys")}><button type="button" onClick={() => sendKey("\x02")}>Ctrl-B</button><button type="button" onClick={() => sendKey("\x03")}>Ctrl-C</button><button type="button" onClick={() => sendKey("\x1b")}>Esc</button><button type="button" onClick={() => sendKey("\t")}>Tab</button><button type="button" onClick={() => sendKey("\x1b[A")}>↑</button><button type="button" onClick={() => sendKey("\x1b[B")}>↓</button><button type="button" onClick={() => sendKey("\x1b[D")}>←</button><button type="button" onClick={() => sendKey("\x1b[C")}>→</button></div>
       </section>

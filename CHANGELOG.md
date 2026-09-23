@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-23
+
+### Added
+
+- Agent Terminal 新增 10–24px 字号调节并保存在浏览器本地；手机显示 44px 触控终端快捷键。
+
+### Changed
+
+- Agent Terminal 使用 `VisualViewport`、`100dvh`、Safe Area 和 `ResizeObserver` 适配手机软键盘、横竖屏、平板及桌面窗口变化，并持续同步 xterm/PTY 行列数。
+
 ## [0.7.1] - 2026-09-23
 
 ### Fixed
@@ -173,7 +183,8 @@
 - Host Credential、幂等 Command、Event Journal/Ack 和 PostgreSQL 约束用于保护控制面与 daemon 通信。
 - Runtime Secret 仅引用 Host 环境，不在 Control Plane 保存明文。
 
-[Unreleased]: https://github.com/foolzzz/abox/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/foolzzz/abox/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/foolzzz/abox/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/foolzzz/abox/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/foolzzz/abox/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/foolzzz/abox/compare/v0.5.0...v0.6.0
