@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-23
+
+### Fixed
+
+- Web Toast ID 不再直接依赖仅限 Secure Context 的 `crypto.randomUUID()`；远程 HTTP、旧版浏览器或缺少该 API 的环境使用 `crypto.getRandomValues`/本地回退生成 UUID。
+
 ## [0.7.0] - 2026-09-22
 
 ### Added
@@ -167,7 +173,8 @@
 - Host Credential、幂等 Command、Event Journal/Ack 和 PostgreSQL 约束用于保护控制面与 daemon 通信。
 - Runtime Secret 仅引用 Host 环境，不在 Control Plane 保存明文。
 
-[Unreleased]: https://github.com/foolzzz/abox/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/foolzzz/abox/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/foolzzz/abox/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/foolzzz/abox/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/foolzzz/abox/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/foolzzz/abox/compare/v0.4.3...v0.5.0
