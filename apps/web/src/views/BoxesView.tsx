@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api/client";
-import type { Agent, Box, Host, ResourceRole, Workspace } from "../api/types";
+import type { Agent, Box, Host, Member, ResourceRole, Workspace } from "../api/types";
 import { Icon } from "../components/Icon";
 import { useToast } from "../components/Toast";
 import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, Modal, PageHeader, RefreshButton, StatusChip } from "../components/ui";
@@ -15,6 +15,7 @@ interface BoxListData {
   agents: Agent[];
   hosts: Host[];
   workspaces: Workspace[];
+  members: Member[];
 }
 
 export function BoxesView() {
@@ -22,17 +23,19 @@ export function BoxesView() {
   const { t } = useI18n();
   const location = useLocation();
   const resource = useResource<BoxListData>(async (signal) => {
-    const [boxes, agents, hosts, workspaces] = await Promise.all([
+    const [boxes, agents, hosts, workspaces, members] = await Promise.all([
       api.listBoxes(signal),
       api.listAgents(signal),
       api.listHosts(signal),
-      api.listWorkspaces(signal)
+      api.listWorkspaces(signal),
+      api.listMembers(signal)
     ]);
-    return { boxes, agents, hosts, workspaces };
+    return { boxes, agents, hosts, workspaces, members };
   }, []);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const canCreate = roleAtLeast(currentUser?.role, "user");
+  const [ownerFilter, setOwnerFilter] = useState("me");
   const createOpen = canCreate && new URLSearchParams(location.search).get("create") === "1";
   const { notify } = useToast();
   const [deletingBox, setDeletingBox] = useState<Box>();
@@ -47,6 +50,7 @@ export function BoxesView() {
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
 
   const data = resource.data!;
+  const memberNames = new Map(data.members.map((member) => [member.id, member.displayName || member.login]));
   const enabledAgents = data.agents.filter((agent) => meta?.enabledRuntimes.includes(agent.runtimeType) ?? agent.runtimeType === "omp");
   const agentNames = new Map(data.agents.map((agent) => [agent.id, agent.name]));
   const hostNames = new Map(data.hosts.map((host) => [host.id, host.name]));
@@ -54,8 +58,10 @@ export function BoxesView() {
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = data.boxes.filter((box) => {
     const matchesStatus = status === "all" || box.status === status;
-    const text = `${box.name} ${agentNames.get(box.agentId) ?? ""} ${hostNames.get(box.hostId) ?? ""}`.toLowerCase();
-    return matchesStatus && (!normalizedQuery || text.includes(normalizedQuery));
+    const ownerID = ownerFilter === "me" ? currentUser?.id : ownerFilter;
+    const matchesOwner = ownerFilter === "all" || box.ownerUserId === ownerID;
+    const text = `${box.name} ${agentNames.get(box.agentId) ?? ""} ${hostNames.get(box.hostId) ?? ""} ${memberNames.get(box.ownerUserId ?? "") ?? ""}`.toLowerCase();
+    return matchesStatus && matchesOwner && (!normalizedQuery || text.includes(normalizedQuery));
   });
   const canDeleteBox = (box: Box) => roleAtLeast(currentUser?.role, "admin") || box.ownerUserId === currentUser?.id;
   const selectableBoxes = filtered.filter(canDeleteBox);
@@ -140,6 +146,7 @@ export function BoxesView() {
         <>
           <div className="list-toolbar">
             <label className="search-field"><Icon name="search" /><span className="sr-only">{t("boxes.search")}</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("boxes.search")} /></label>
+            <label className="filter-field"><span className="sr-only">{t("boxes.ownerFilter")}</span><select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} aria-label={t("boxes.ownerFilter")}><option value="me">{t("boxes.myBoxes")}</option><option value="all">{t("boxes.allOwners")}</option>{data.members.filter((member) => member.status === "active" && member.id !== currentUser?.id && data.boxes.some((box) => box.ownerUserId === member.id)).map((member) => <option value={member.id} key={member.id}>{member.displayName || member.login}</option>)}</select></label>
             <label className="filter-field"><span className="sr-only">Filter by status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">{t("boxes.allStatuses")}</option><option value="running">Running</option><option value="idle">Idle</option><option value="waiting_approval">Waiting approval</option><option value="hibernated">Hibernated</option><option value="error">Error</option><option value="terminated">Terminated</option></select></label>
             {selectableBoxes.length ? <label className="box-bulk-select"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} aria-label={t("boxes.selectAll")} /><span>{t("boxes.selected", { count: selectedBoxes.length })}</span></label> : null}
             {selectedBoxes.length ? <Button variant="danger" icon="trash" onClick={openBatchDelete}>{t("boxes.deleteSelected", { count: selectedBoxes.length })}</Button> : null}
@@ -218,6 +225,8 @@ function CreateBoxModal({
   const [workspaceId, setWorkspaceId] = useState("");
   const [projectPath, setProjectPath] = useState("");
   const [placementMode, setPlacementMode] = useState<"path" | "workspace">(organizationAdmin ? "path" : "workspace");
+  const [runtimeSessionMode, setRuntimeSessionMode] = useState<"new" | "resume">("new");
+  const [runtimeSessionRef, setRuntimeSessionRef] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const [workspaceAccess, setWorkspaceAccess] = useState<ResourceRole>();
@@ -228,6 +237,8 @@ function CreateBoxModal({
     if (!open) {
       setError(undefined);
       setPlacementMode(organizationAdmin ? "path" : "workspace");
+      setRuntimeSessionMode("new");
+      setRuntimeSessionRef("");
     }
   }, [open, organizationAdmin]);
 
@@ -243,6 +254,12 @@ function CreateBoxModal({
   const selectedHost = hosts.find((host) => host.id === selectedHostId);
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
   const normalizedProjectPath = projectPath.trim().replace(/\/+$/, "") || "/";
+
+  useEffect(() => {
+    if (selectedAgent?.runtimeType === "claude") return;
+    setRuntimeSessionMode("new");
+    setRuntimeSessionRef("");
+  }, [selectedAgent?.runtimeType]);
 
   useEffect(() => {
     if (hostId && !compatibleHosts.some((host) => host.id === hostId)) {
@@ -303,13 +320,15 @@ function CreateBoxModal({
         onWorkspaceCreated(workspace);
         targetWorkspaceId = workspace.id;
       }
-      const box = await api.createBox({ name: name.trim(), agentId: selectedAgentId, hostId: selectedHostId, workspaceId: targetWorkspaceId });
+      const box = await api.createBox({ name: name.trim(), agentId: selectedAgentId, hostId: selectedHostId, workspaceId: targetWorkspaceId, runtimeSessionMode, runtimeSessionRef: runtimeSessionMode === "resume" ? runtimeSessionRef.trim() : undefined });
       notify(`${box.name} was created.`);
       setName("");
       setAgentId("");
       setHostId("");
       setWorkspaceId("");
       setProjectPath("");
+      setRuntimeSessionMode("new");
+      setRuntimeSessionRef("");
       onCreated(box);
     } catch (requestError) {
       setError(errorMessage(requestError));
@@ -322,6 +341,7 @@ function CreateBoxModal({
   const directoryReady = placementMode === "path"
     ? organizationAdmin && selectedHostId !== "" && projectPath.trim().startsWith("/")
     : selectedHostId !== "" && selectedWorkspaceId !== "" && canUseSelectedWorkspace;
+  const runtimeSessionReady = runtimeSessionMode === "new" || runtimeSessionRef.trim() !== "";
 
   return (
     <Modal open={open} onClose={onClose} title={t("boxes.createTitle")} description={t("boxes.createDescription")} size="large">
@@ -331,6 +351,8 @@ function CreateBoxModal({
         <label className="field"><span>{t("boxes.boxName")}</span><input autoFocus required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /><small>{t("boxes.boxNameHint")}</small></label>
         <label className="field"><span>{t("boxes.stepAgent")}</span><select required value={selectedAgentId} onChange={(event) => { setAgentId(event.target.value); setHostId(""); setWorkspaceId(""); }}><option value="">{t("boxes.selectAgent")}</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.name} · {agent.runtimeType.toUpperCase()}</option>)}</select></label>
         {selectedAgent ? <div className="selection-summary"><Icon name="agent" /><div><strong>{selectedAgent.name}</strong><small>{selectedAgent.model || "Runtime default model"} · version {selectedAgent.version}</small></div><StatusChip status={selectedAgent.runtimeType} compact /></div> : null}
+        {selectedAgent?.runtimeType === "claude" ? <fieldset className="segmented-field"><legend>{t("boxes.sessionSource")}</legend><label><input type="radio" name="runtimeSessionMode" checked={runtimeSessionMode === "new"} onChange={() => { setRuntimeSessionMode("new"); setRuntimeSessionRef(""); }} />{t("boxes.sessionNew")}</label><label><input type="radio" name="runtimeSessionMode" checked={runtimeSessionMode === "resume"} onChange={() => setRuntimeSessionMode("resume")} />{t("boxes.sessionResume")}</label></fieldset> : null}
+        {selectedAgent?.runtimeType === "claude" && runtimeSessionMode === "resume" ? <><label className="field"><span>{t("boxes.sessionRef")}</span><input className="mono" required maxLength={256} value={runtimeSessionRef} onChange={(event) => setRuntimeSessionRef(event.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" aria-label={t("boxes.sessionRef")} /><small>{t("boxes.sessionRefHint")}</small></label><InlineAlert tone="warning">{t("boxes.sessionResumeWarning")}</InlineAlert></> : null}
         {selectedAgent && compatibleHosts.length === 0 ? <InlineAlert tone="warning">No online host supports {selectedAgent.runtimeType.toUpperCase()}.</InlineAlert> : null}
         <label className="field"><span>{t("boxes.host")}</span><select required value={selectedHostId} onChange={(event) => { setHostId(event.target.value); setWorkspaceId(""); }} disabled={!selectedAgentId}><option value="">{t("boxes.selectHost")}</option>{compatibleHosts.map((host) => <option value={host.id} key={host.id}>{host.name} · {host.systemHostname || [host.os, host.arch].filter(Boolean).join("/")} · {host.runtimes.join(", ")}</option>)}</select></label>
         {organizationAdmin ? <fieldset className="segmented-field"><legend>{t("boxes.stepDirectory")}</legend><label><input type="radio" name="placementMode" checked={placementMode === "path"} onChange={() => setPlacementMode("path")} />{t("boxes.pathMode")}</label><label><input type="radio" name="placementMode" checked={placementMode === "workspace"} onChange={() => setPlacementMode("workspace")} />{t("boxes.workspaceMode")}</label></fieldset> : null}
@@ -345,7 +367,7 @@ function CreateBoxModal({
         {placementMode === "workspace" && selectedWorkspace && !checkingWorkspaceAccess && !workspaceAccessError && !canUseSelectedWorkspace ? <InlineAlert tone="warning">{t("boxes.viewerWorkspace")}</InlineAlert> : null}
         <div className="modal__actions">
           <Button type="button" onClick={onClose}>{t("boxes.cancel")}</Button>
-          <Button type="submit" variant="primary" icon="spark" busy={submitting || checkingWorkspaceAccess} disabled={!name.trim() || !selectedAgentId || !directoryReady}>{submitting && placementMode === "path" ? t("boxes.validatingDirectory") : t("boxes.create")}</Button>
+          <Button type="submit" variant="primary" icon="spark" busy={submitting || checkingWorkspaceAccess} disabled={!name.trim() || !selectedAgentId || !directoryReady || !runtimeSessionReady}>{submitting && placementMode === "path" ? t("boxes.validatingDirectory") : t("boxes.create")}</Button>
         </div>
       </form>
     </Modal>

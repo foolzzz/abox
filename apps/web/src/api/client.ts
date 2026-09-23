@@ -137,8 +137,8 @@ export const api = {
   deleteAgent: (agentId: string, signal?: AbortSignal) =>
     request<void>(`/agents/${encode(agentId)}`, { method: "DELETE", signal }),
   listHosts: (signal?: AbortSignal) => request<Host[]>("/hosts", { signal }),
-  deleteHost: (hostId: string, signal?: AbortSignal) =>
-    request<void>(`/hosts/${encode(hostId)}`, { method: "DELETE", signal }),
+  deleteHost: (hostId: string, cascade = false, signal?: AbortSignal) =>
+    request<void>(`/hosts/${encode(hostId)}${cascade ? "?cascade=true" : ""}`, { method: "DELETE", signal }),
   listWorkspaces: (signal?: AbortSignal) => request<Workspace[]>("/workspaces", { signal }),
   getWorkspace: (workspaceId: string, signal?: AbortSignal) =>
     request<Workspace>(`/workspaces/${encode(workspaceId)}`, { signal }),

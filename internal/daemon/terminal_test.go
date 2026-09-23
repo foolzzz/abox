@@ -32,3 +32,20 @@ func TestEnsureTmuxUpdateEnvironmentAddsClaudeAPIKey(t *testing.T) {
 		t.Fatalf("update-environment = %q", content)
 	}
 }
+
+func TestAgentRuntimeCommandResumesClaudeSession(t *testing.T) {
+	command, err := agentRuntimeCommand("claude", "claude-opus-4-6", "resume", "3f8f5ddb-c916-421b-8e21-4423a0a96af6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions", "--resume", "3f8f5ddb-c916-421b-8e21-4423a0a96af6", "--model", "claude-opus-4-6"}
+	if strings.Join(command, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("command = %#v, want %#v", command, want)
+	}
+}
+
+func TestAgentRuntimeCommandRejectsResumeForOtherRuntimes(t *testing.T) {
+	if _, err := agentRuntimeCommand("omp", "", "resume", "session"); err == nil {
+		t.Fatal("expected non-Claude resume to fail")
+	}
+}

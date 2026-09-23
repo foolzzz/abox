@@ -154,6 +154,8 @@ export interface Box {
   status: BoxStatus;
   ownerUserId?: string;
   runtimeType?: RuntimeType | string;
+  runtimeSessionMode?: "new" | "resume";
+  runtimeSessionRef?: string;
   version?: number;
   lastEventSeq?: number;
   createdAt?: string;
@@ -166,6 +168,8 @@ export interface CreateBoxRequest {
   model?: string;
   hostId: string;
   workspaceId: string;
+  runtimeSessionMode?: "new" | "resume";
+  runtimeSessionRef?: string;
 }
 
 export interface BoxSnapshot extends Box {

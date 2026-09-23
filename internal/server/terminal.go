@@ -131,7 +131,7 @@ func (s *Server) handleTerminal(writer http.ResponseWriter, request *http.Reques
 	sessionID := uuid.NewString()
 	subscription := s.terminals.register(sessionID, box.HostID)
 	defer s.terminals.unregister(sessionID, subscription)
-	if !s.hosts.sendTerminal(box.HostID, &hostv1.TerminalInput{SessionId: sessionID, BoxId: box.ID, Workspace: workspace.Path, Mode: mode, RuntimeType: box.RuntimeType, Model: box.Model, Open: true, Columns: 120, Rows: 32}) {
+	if !s.hosts.sendTerminal(box.HostID, &hostv1.TerminalInput{SessionId: sessionID, BoxId: box.ID, Workspace: workspace.Path, Mode: mode, RuntimeType: box.RuntimeType, Model: box.Model, RuntimeSessionMode: box.RuntimeSessionMode, RuntimeSessionRef: box.RuntimeSessionRef, Open: true, Columns: 120, Rows: 32}) {
 		_ = connection.WriteJSON(terminalServerMessage{Type: "error", Error: "host is offline"})
 		return
 	}

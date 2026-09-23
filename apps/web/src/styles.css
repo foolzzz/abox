@@ -299,6 +299,8 @@ select:disabled, input:disabled, textarea:disabled { opacity: 0.55; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 9px; padding-top: 4px; }
 .confirm-dialog { padding: 22px; }
 .confirm-dialog > p { color: var(--text-muted); font-size: 0.82rem; line-height: 1.55; }
+.confirm-checkbox { display: flex; align-items: flex-start; gap: 9px; margin: 14px 0; padding: 12px; color: var(--text-muted); background: var(--red-soft); border: 1px solid rgba(255, 124, 134, .24); border-radius: 9px; font-size: .72rem; line-height: 1.45; }
+.confirm-checkbox input { flex: 0 0 auto; width: 16px; height: 16px; margin-top: 2px; padding: 0; accent-color: var(--red); box-shadow: none; }
 .stepper { display: flex; align-items: center; padding: 20px 22px 0; }
 .stepper__step { display: flex; align-items: center; gap: 7px; color: var(--text-faint); font-size: 0.72rem; font-weight: 600; }
 .stepper__step b { display: grid; width: 24px; height: 24px; place-items: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 50%; font-size: 0.66rem; }

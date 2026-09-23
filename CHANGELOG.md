@@ -6,10 +6,21 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-22
+
+
 ### Added
 
 - 新增 `docs/deployment.md`，覆盖 Control Plane/Worker 拓扑、macOS LaunchAgent、Linux systemd user service、PostgreSQL、OMP/Codex/Claude 认证、升级、回滚、健康检查和卸载。
 - Agent Terminal 和 Command Terminal 新增浏览器页面内宽屏模式；不调用 Fullscreen API，支持工具栏退出和 `Esc` 快捷退出。
+- Claude Box 可手动填写 Session UUID，通过 `claude --resume` 恢复本机历史对话；允许多个 Box 使用相同 Session Ref。
+- Box 列表默认只显示当前用户的 Box，并支持按 Organization 用户或全部 Owner 筛选。
+- Offline Host 删除支持显式级联：终止依赖 Box、删除 Schedule、归档 Workspace 后吊销 Host。
+
+### Changed
+
+- 新建 Agent 暂停 System Prompt 输入；Claude 默认模型为 `claude-opus-4-6`，OMP/Codex 默认模型为 `gpt-5.6-sol`，模型仍可编辑。
+- Host 不再限制可注册的 Box 数量；`maxActiveBoxes` 仅限制同时运行的 Runtime 数量。
 
 ## [0.4.3] - 2026-09-22
 
@@ -136,7 +147,8 @@
 - Host Credential、幂等 Command、Event Journal/Ack 和 PostgreSQL 约束用于保护控制面与 daemon 通信。
 - Runtime Secret 仅引用 Host 环境，不在 Control Plane 保存明文。
 
-[Unreleased]: https://github.com/foolzzz/abox/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/foolzzz/abox/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/foolzzz/abox/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/foolzzz/abox/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/foolzzz/abox/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/foolzzz/abox/compare/v0.4.0...v0.4.1

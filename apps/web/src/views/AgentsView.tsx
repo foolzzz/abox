@@ -12,6 +12,7 @@ import { navigate, useLocation } from "../lib/router";
 
 const DEFAULT_RUNTIME_TYPES: RuntimeType[] = ["omp"];
 const RUNTIME_LABELS: Record<RuntimeType, string> = { omp: "OMP", codex: "Codex", claude: "Claude", acp: "ACP" };
+const DEFAULT_MODEL_BY_RUNTIME: Partial<Record<RuntimeType, string>> = { omp: "gpt-5.6-sol", codex: "gpt-5.6-sol", claude: "claude-opus-4-6" };
 
 interface AgentListData {
   agents: Agent[];
@@ -150,9 +151,9 @@ function CreateAgentModal({ open, hosts, runtimeTypes, runtimeModels, onClose, o
   const { notify } = useToast();
   const { t } = useI18n();
   const [name, setName] = useState("");
-  const [runtimeType, setRuntimeType] = useState<RuntimeType>(runtimeTypes[0] ?? "omp");
-  const [model, setModel] = useState("");
-  const [systemPrompt, setSystemPrompt] = useState("");
+  const initialRuntime = runtimeTypes[0] ?? "omp";
+  const [runtimeType, setRuntimeType] = useState<RuntimeType>(initialRuntime);
+  const [model, setModel] = useState(DEFAULT_MODEL_BY_RUNTIME[initialRuntime] ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const runtimeHosts: Record<RuntimeType, number> = { omp: 0, codex: 0, claude: 0, acp: 0 };
@@ -166,20 +167,31 @@ function CreateAgentModal({ open, hosts, runtimeTypes, runtimeModels, onClose, o
   const modelSuggestions = runtimeModels[runtimeType] ?? [];
 
   useEffect(() => {
-    if (!runtimeTypes.includes(runtimeType) && runtimeTypes[0]) setRuntimeType(runtimeTypes[0]);
+    if (!runtimeTypes.includes(runtimeType) && runtimeTypes[0]) {
+      setRuntimeType(runtimeTypes[0]);
+      setModel(DEFAULT_MODEL_BY_RUNTIME[runtimeTypes[0]] ?? "");
+    }
   }, [runtimeType, runtimeTypes]);
+
+  useEffect(() => {
+    if (open) return;
+    const resetRuntime = runtimeTypes[0] ?? "omp";
+    setRuntimeType(resetRuntime);
+    setModel(DEFAULT_MODEL_BY_RUNTIME[resetRuntime] ?? "");
+    setError(undefined);
+  }, [open, runtimeTypes]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSubmitting(true);
     setError(undefined);
     try {
-      const agent = await api.createAgent({ name: name.trim(), runtimeType, model: model.trim() || null, systemPrompt: systemPrompt.trim() });
+      const agent = await api.createAgent({ name: name.trim(), runtimeType, model: model.trim() || null, systemPrompt: "" });
       notify(t("agents.created", { name: agent.name }));
       setName("");
-      setModel("");
-      setSystemPrompt("");
-      setRuntimeType(runtimeTypes[0] ?? "omp");
+      const resetRuntime = runtimeTypes[0] ?? "omp";
+      setRuntimeType(resetRuntime);
+      setModel(DEFAULT_MODEL_BY_RUNTIME[resetRuntime] ?? "");
       onCreated(agent);
     } catch (requestError) {
       setError(errorMessage(requestError));
@@ -197,12 +209,11 @@ function CreateAgentModal({ open, hosts, runtimeTypes, runtimeModels, onClose, o
           <legend>{t("agents.runtime")}</legend>
           {runtimeTypes.map((runtime) => {
             const availableHosts = runtimeHosts[runtime];
-            return <label className={cx("runtime-option", runtimeType === runtime && "runtime-option--selected")} key={runtime}><input type="radio" name="runtime" value={runtime} checked={runtimeType === runtime} onChange={() => setRuntimeType(runtime)} /><span className="resource-icon resource-icon--agent"><Icon name="terminal" /></span><span><strong>{RUNTIME_LABELS[runtime]}</strong><small>{availableHosts ? t("agents.onlineHosts", { count: availableHosts }) : t("agents.noHost")}</small></span><StatusChip status={availableHosts ? "available" : "unavailable"} compact /></label>;
+            return <label className={cx("runtime-option", runtimeType === runtime && "runtime-option--selected")} key={runtime}><input type="radio" name="runtime" value={runtime} checked={runtimeType === runtime} onChange={() => { setRuntimeType(runtime); setModel(DEFAULT_MODEL_BY_RUNTIME[runtime] ?? ""); }} /><span className="resource-icon resource-icon--agent"><Icon name="terminal" /></span><span><strong>{RUNTIME_LABELS[runtime]}</strong><small>{availableHosts ? t("agents.onlineHosts", { count: availableHosts }) : t("agents.noHost")}</small></span><StatusChip status={availableHosts ? "available" : "unavailable"} compact /></label>;
           })}
         </fieldset>
         {selectedRuntimeHosts === 0 ? <InlineAlert tone="warning">{t("agents.unavailable", { runtime: RUNTIME_LABELS[runtimeType] })}</InlineAlert> : null}
         <label className="field"><span>{t("agents.model")} <em>{t("common.optional")}</em></span><input list={`agent-model-suggestions-${runtimeType}`} value={model} onChange={(event) => setModel(event.target.value)} /><datalist id={`agent-model-suggestions-${runtimeType}`}>{modelSuggestions.map((suggestion) => <option key={suggestion} value={suggestion} />)}</datalist><small>{t("agents.modelHint", { runtime: RUNTIME_LABELS[runtimeType] })}</small></label>
-        <label className="field"><span>{t("agents.instructions")} <em>{t("common.optional")}</em></span><textarea rows={9} value={systemPrompt} onChange={(event) => setSystemPrompt(event.target.value)} /><small>{t("agents.instructionsHint")}</small></label>
         <div className="modal__actions"><Button type="button" onClick={onClose}>{t("common.cancel")}</Button><Button type="submit" variant="primary" icon="check" busy={submitting} disabled={!name.trim()}>{t("agents.new")}</Button></div>
       </form>
     </Modal>

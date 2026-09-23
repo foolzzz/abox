@@ -223,6 +223,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] OMP 的 Prompt、Steer、Follow-up、Interrupt、Stop、Resume、Subagent、Todo 与 Tool Event 实测通过。
 - [x] Approval Reaper 和后台 Approval 状态机保留，但 Web 不提供独立审批页面。
 - [x] Agent Definition 模型作为新 Box 默认值；Box 可单独切换模型并安全重启 Runtime/tmux。
+- [x] 新建 Agent 暂停 System Prompt 输入；Claude 默认模型为 `claude-opus-4-6`，OMP/Codex 默认模型为 `gpt-5.6-sol`，模型字段仍可修改。
 - [x] System Prompt 可留空并使用 Runtime CLI 默认值；模型支持建议列表、自由填写和 Runtime 默认值。
 
 ### 13.3 Remote 与多用户
@@ -279,6 +280,10 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] 删除 Box 会从列表隐藏 Session，并终止 Managed Runtime 和 tmux Agent Terminal。
 - [x] Agent Terminal 和 Command Terminal 支持浏览器页面内宽屏模式：覆盖应用侧栏和页面标题但不调用浏览器 Fullscreen API，可通过工具栏按钮或 `Esc` 退出，并自动重新计算 PTY 行列数。
 - [x] Admin 新建 Box 时填写 Host 本地路径；若该 Host 尚未注册此路径，Web 自动创建并等待 Workspace 验证成功，再使用新 Workspace 创建 Box；已注册路径直接复用。
+- [x] Claude Box 可选择新会话或手动填写 Claude Session UUID 恢复历史对话；允许多个 Box 使用相同 Session Ref，Box 删除不删除 Claude 历史。
+- [x] Box 列表默认按当前用户过滤，并支持切换到其他 Organization 用户或全部 Owner。
+- [x] Host 可注册任意数量 Box；`maxActiveBoxes` 仅作为同时运行 Runtime 的并发上限。
+- [x] Offline Host 删除可显式选择级联依赖：终止 Box、删除 Schedule、归档 Workspace、取消相关运行后吊销 Host Credential。
 - [ ] 真实手机/Tailnet 网络切换后重新 attach 同一 tmux Session。
 
 ### 13.8 2026-09-18 UI 删除与创建回归待办
@@ -291,7 +296,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] **一步创建 Agent Box**：创建页在同一表单中同时提供名称、Agent、目标 Host、项目目录/Workspace，并且仅有一次提交动作；不存在分步器，成功提交后创建完整绑定的 Box。
 - [x] **PWA 更新激活**：新 Web 构建发布后，已打开或再次访问的 PWA 客户端自动激活等待中的 Service Worker，并自动重新加载到最新构建，无需用户手动清缓存或关闭全部标签页。
 - [x] **Runtime 可用性恢复**：Server Frame Idempotency Store 采用有界滚动保留，不因长期心跳耗尽容量；Control Plane 重启后 daemon 通过 gRPC keepalive 和主动重连恢复连接；Agent 创建弹窗打开期间自动刷新 Host Runtime 状态，在线 Host 的 OMP、Codex、Claude 在 E2E 等待预算内重新显示为可用。
-- [x] **浏览器 E2E 回归覆盖**：真实 Chrome 用稳定的可访问名称定位并执行 Box 单项/批量删除、Host、Agent Definition、Workspace 删除流程（包括权限、Host online/offline、批量部分失败和受保护删除冲突），并覆盖一步创建 Agent Box、未注册路径自动创建 Workspace、Terminal 页面内宽屏、Runtime 可用性/自动刷新与 PWA 新版本自动激活/重载；隔离 Fixture Suite `npm --workspace apps/web run test:e2e` 共 12 项通过，真实本机部署 Suite `npm --workspace apps/web run test:e2e:local` 共 3 项通过。
+- [x] **浏览器 E2E 回归覆盖**：真实 Chrome 覆盖 Box 单项/批量删除、Owner 默认/用户筛选、Claude 手动 Resume 重复绑定、Host 级联删除、Agent 默认模型、System Prompt 入口关闭、未注册路径自动 Workspace、Terminal 页面内宽屏、Runtime 可用性与 PWA 更新；隔离 Fixture Suite `npm --workspace apps/web run test:e2e` 共 16 项通过，真实本机部署 Suite `npm --workspace apps/web run test:e2e:local` 共 4 项通过。
 
 
 ## 14. 范围外

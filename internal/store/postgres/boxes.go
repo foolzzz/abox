@@ -9,6 +9,7 @@ import (
 	"agentbox/internal/domain"
 	storepkg "agentbox/internal/store"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -16,6 +17,7 @@ const boxSelect = `
     SELECT b.id, b.organization_id, b.name, b.agent_id, b.agent_version_id,
            b.host_id, b.workspace_id, b.owner_user_id, b.runtime_type,
            COALESCE(b.model_override, (SELECT av.model FROM agent_versions av WHERE av.id = b.agent_version_id), ''),
+           b.runtime_session_mode, COALESCE(b.runtime_session_ref, ''),
            b.visibility, b.status, b.version, b.next_event_seq - 1, b.created_at, b.updated_at
     FROM boxes b`
 
@@ -67,6 +69,23 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
 	if len(input.Model) > 128 {
 		return domain.Box{}, fmt.Errorf("%w: model must not exceed 128 characters", storepkg.ErrInvalidState)
 	}
+	input.RuntimeSessionMode = strings.ToLower(strings.TrimSpace(input.RuntimeSessionMode))
+	if input.RuntimeSessionMode == "" {
+		input.RuntimeSessionMode = "new"
+	}
+	input.RuntimeSessionRef = strings.TrimSpace(input.RuntimeSessionRef)
+	if input.RuntimeSessionMode != "new" && input.RuntimeSessionMode != "resume" {
+		return domain.Box{}, fmt.Errorf("%w: runtime session mode must be new or resume", storepkg.ErrInvalidState)
+	}
+	if input.RuntimeSessionMode == "new" && input.RuntimeSessionRef != "" {
+		return domain.Box{}, fmt.Errorf("%w: new runtime session must not include a session reference", storepkg.ErrInvalidState)
+	}
+	if input.RuntimeSessionMode == "resume" && input.RuntimeSessionRef == "" {
+		return domain.Box{}, fmt.Errorf("%w: resume runtime session requires a session reference", storepkg.ErrInvalidState)
+	}
+	if len(input.RuntimeSessionRef) > 256 {
+		return domain.Box{}, fmt.Errorf("%w: runtime session reference must not exceed 256 characters", storepkg.ErrInvalidState)
+	}
 	var result domain.Box
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		allowed, err := canOperateWorkspace(ctx, tx, user, input.WorkspaceID)
@@ -90,12 +109,19 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
 		if err != nil {
 			return mapError("get box agent version", err)
 		}
+		if input.RuntimeSessionMode == "resume" {
+			if runtimeType != "claude" {
+				return fmt.Errorf("%w: manual session resume is currently supported only for Claude", storepkg.ErrInvalidState)
+			}
+			if _, parseErr := uuid.Parse(input.RuntimeSessionRef); parseErr != nil {
+				return fmt.Errorf("%w: claude session reference must be a UUID", storepkg.ErrInvalidState)
+			}
+		}
 
 		var hostStatus domain.HostStatus
-		var maxActiveBoxes int
 		var runtimeAvailable bool
 		err = tx.QueryRow(ctx, `
-            SELECT h.status, h.max_active_boxes,
+            SELECT h.status,
                    EXISTS (
                        SELECT 1 FROM host_runtime_capabilities c
                        WHERE c.host_id = h.id AND c.runtime_name = $3 AND c.status = 'available'
@@ -103,7 +129,7 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
             FROM hosts h
             WHERE h.organization_id = $1 AND h.id = $2
             FOR SHARE`, user.OrganizationID, input.HostID, runtimeType).Scan(
-			&hostStatus, &maxActiveBoxes, &runtimeAvailable,
+			&hostStatus, &runtimeAvailable,
 		)
 		if err != nil {
 			return mapError("get box host", err)
@@ -113,18 +139,6 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
 		}
 		if !runtimeAvailable {
 			return fmt.Errorf("%w: runtime %s is unavailable", storepkg.ErrRuntimeMissing, runtimeType)
-		}
-		var activeCount int
-		err = tx.QueryRow(ctx, `
-            SELECT count(*)
-            FROM runtime_instances
-            WHERE host_id = $1 AND status IN ('starting', 'ready', 'busy', 'stopping')`,
-			input.HostID).Scan(&activeCount)
-		if err != nil {
-			return mapError("count active host runtimes", err)
-		}
-		if activeCount >= maxActiveBoxes {
-			return fmt.Errorf("%w: host runtime capacity reached", storepkg.ErrConflict)
 		}
 
 		var workspaceHostID, workspaceStatus string
@@ -148,17 +162,19 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
             INSERT INTO boxes(
                 id, organization_id, name, agent_id, agent_version_id,
                 host_id, workspace_id, owner_user_id, visibility, status,
-                runtime_type, model_override, idle_timeout_seconds
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'private','created',$9,$10,$11)`,
+                runtime_type, model_override, idle_timeout_seconds,
+                runtime_session_mode, runtime_session_ref
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'private','created',$9,$10,$11,$12,$13)`,
 			boxID, user.OrganizationID, strings.TrimSpace(input.Name), input.AgentID,
 			agentVersionID, input.HostID, input.WorkspaceID, user.ID, runtimeType, nullableText(input.Model), idleTimeout,
+			input.RuntimeSessionMode, nullableText(input.RuntimeSessionRef),
 		)
 		if err != nil {
 			return mapError("insert box", err)
 		}
 		if err := insertAudit(ctx, tx, user.OrganizationID, "user", user.ID, "",
 			"box.created", "box", boxID,
-			map[string]any{"agentId": input.AgentID, "agentVersionId": agentVersionID, "hostId": input.HostID, "workspaceId": input.WorkspaceID, "model": input.Model}); err != nil {
+			map[string]any{"agentId": input.AgentID, "agentVersionId": agentVersionID, "hostId": input.HostID, "workspaceId": input.WorkspaceID, "model": input.Model, "runtimeSessionMode": input.RuntimeSessionMode, "runtimeSessionRefSuffix": sessionReferenceSuffix(input.RuntimeSessionRef)}); err != nil {
 			return err
 		}
 		result, err = getBoxByOrganization(ctx, tx, user.OrganizationID, boxID)
@@ -421,10 +437,19 @@ func scanBox(row scanner) (domain.Box, error) {
 	err := row.Scan(
 		&result.ID, &result.OrganizationID, &result.Name, &result.AgentID,
 		&result.AgentVersionID, &result.HostID, &result.WorkspaceID,
-		&result.OwnerUserID, &result.RuntimeType, &result.Model, &result.Visibility, &result.Status,
+		&result.OwnerUserID, &result.RuntimeType, &result.Model,
+		&result.RuntimeSessionMode, &result.RuntimeSessionRef, &result.Visibility, &result.Status,
 		&result.Version, &result.LastEventSeq, &result.CreatedAt, &result.UpdatedAt,
 	)
 	return result, err
+}
+
+func sessionReferenceSuffix(reference string) string {
+	reference = strings.TrimSpace(reference)
+	if len(reference) <= 8 {
+		return reference
+	}
+	return reference[len(reference)-8:]
 }
 
 func canReadBox(ctx context.Context, q querier, user domain.User, boxID string) (bool, error) {

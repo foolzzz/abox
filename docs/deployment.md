@@ -1,6 +1,6 @@
 # AgentBox 部署指南
 
-本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.4.3`。
+本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.5.0`。
 
 ## 1. 部署拓扑
 
@@ -72,16 +72,16 @@ claude --version
 Release 页面：
 
 ```text
-https://github.com/foolzzz/abox/releases/tag/v0.4.3
+https://github.com/foolzzz/abox/releases/tag/v0.5.0
 ```
 
 根据操作系统和架构下载：
 
 ```text
-agentbox-0.4.3-darwin-arm64.tar.gz
-agentbox-0.4.3-darwin-amd64.tar.gz
-agentbox-0.4.3-linux-arm64.tar.gz
-agentbox-0.4.3-linux-amd64.tar.gz
+agentbox-0.5.0-darwin-arm64.tar.gz
+agentbox-0.5.0-darwin-amd64.tar.gz
+agentbox-0.5.0-linux-arm64.tar.gz
+agentbox-0.5.0-linux-amd64.tar.gz
 checksums.txt
 ```
 
@@ -90,13 +90,13 @@ checksums.txt
 macOS：
 
 ```bash
-shasum -a 256 agentbox-0.4.3-darwin-arm64.tar.gz
+shasum -a 256 agentbox-0.5.0-darwin-arm64.tar.gz
 ```
 
 Linux：
 
 ```bash
-sha256sum agentbox-0.4.3-linux-amd64.tar.gz
+sha256sum agentbox-0.5.0-linux-amd64.tar.gz
 ```
 
 输出必须与 `checksums.txt` 中对应文件一致。
@@ -104,8 +104,8 @@ sha256sum agentbox-0.4.3-linux-amd64.tar.gz
 解压：
 
 ```bash
-tar -xzf agentbox-0.4.3-<os>-<arch>.tar.gz
-cd agentbox-0.4.3-<os>-<arch>
+tar -xzf agentbox-0.5.0-<os>-<arch>.tar.gz
+cd agentbox-0.5.0-<os>-<arch>
 ```
 
 ## 4. 安装文件
@@ -187,7 +187,7 @@ docker exec agentbox-postgres pg_isready -U agentbox -d agentbox
   "publicUrl": "http://127.0.0.1:8080",
   "enrollmentToken": "<random-enrollment-token>",
   "webDir": "~/.agentbox/web",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "approvalPollInterval": "1s",
   "hibernationPollInterval": "30s",
   "schedulePollInterval": "1s",
@@ -370,6 +370,22 @@ launchctl kickstart -k "gui/$(id -u)/io.agentbox.daemon"
 ```
 
 该环境变量由 tmux 的 `update-environment` 复制到新 Claude Agent Terminal。AgentBox 不读取、记录或持久化 Key 值。
+
+### 8.5 恢复本机 Claude Session
+
+新建 Claude Box 时可以选择“恢复已有会话”并填写 Claude Session UUID。AgentBox 在所选 Host 上启动：
+
+```bash
+claude --resume <session-id>
+```
+
+多个 Box 可以使用同一个 Session Ref；每个 Box 仍拥有独立的 AgentBox tmux。删除 Box 只终止对应 tmux/Runtime，不删除 Claude 本地历史。恢复会继承原对话及 System Prompt Snapshot，当前 Agent Definition 不覆盖原历史。
+
+Box 列表默认只显示当前用户创建的 Box，可以通过 Owner 筛选切换其他 Organization 用户或全部可见 Box。
+
+Host 可以注册任意数量 Box。`maxActiveBoxes` 只限制同时运行的 Runtime 数量，不限制 Box 记录数量。
+
+删除 Offline Host 时可以显式选择级联依赖。级联会终止该 Host 的 Box、删除 Schedule、归档 Workspace、取消未完成运行和命令，再吊销 Host Credential；该操作不可撤销，执行前必须确认数据库备份和影响范围。
 
 ## 9. macOS 启动服务
 

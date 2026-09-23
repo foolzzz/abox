@@ -245,7 +245,8 @@ func (s *Server) handleGetHost(writer http.ResponseWriter, request *http.Request
 
 func (s *Server) handleDeleteHost(writer http.ResponseWriter, request *http.Request) {
 	user, _ := requestUser(request)
-	if err := s.store.DeleteHost(request.Context(), user, chi.URLParam(request, "hostID")); err != nil {
+	cascade := strings.EqualFold(strings.TrimSpace(request.URL.Query().Get("cascade")), "true")
+	if err := s.store.DeleteHost(request.Context(), user, chi.URLParam(request, "hostID"), cascade); err != nil {
 		s.writeStoreError(writer, "delete host", err)
 		return
 	}
@@ -340,11 +341,13 @@ func (s *Server) handleGetBox(writer http.ResponseWriter, request *http.Request)
 
 func (s *Server) handleCreateBox(writer http.ResponseWriter, request *http.Request) {
 	var body struct {
-		Name        string `json:"name"`
-		AgentID     string `json:"agentId"`
-		Model       string `json:"model"`
-		HostID      string `json:"hostId"`
-		WorkspaceID string `json:"workspaceId"`
+		Name               string `json:"name"`
+		AgentID            string `json:"agentId"`
+		Model              string `json:"model"`
+		HostID             string `json:"hostId"`
+		WorkspaceID        string `json:"workspaceId"`
+		RuntimeSessionMode string `json:"runtimeSessionMode"`
+		RuntimeSessionRef  string `json:"runtimeSessionRef"`
 	}
 	if err := decodeJSON(request, &body); err != nil {
 		writeProblem(writer, http.StatusBadRequest, "invalid_request", err.Error())
@@ -365,11 +368,13 @@ func (s *Server) handleCreateBox(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	box, err := s.store.CreateBox(request.Context(), user, domain.CreateBoxInput{
-		Name:        body.Name,
-		AgentID:     body.AgentID,
-		Model:       body.Model,
-		HostID:      body.HostID,
-		WorkspaceID: body.WorkspaceID,
+		Name:               body.Name,
+		AgentID:            body.AgentID,
+		Model:              body.Model,
+		HostID:             body.HostID,
+		WorkspaceID:        body.WorkspaceID,
+		RuntimeSessionMode: body.RuntimeSessionMode,
+		RuntimeSessionRef:  body.RuntimeSessionRef,
 	})
 	if err != nil {
 		s.writeStoreError(writer, "create box", err)

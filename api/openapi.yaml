@@ -169,8 +169,15 @@ paths:
         schema: {type: string, format: uuid}
     delete:
       operationId: deleteHost
+      parameters:
+        - name: cascade
+          in: query
+          required: false
+          schema: {type: boolean, default: false}
+          description: Terminate dependent Boxes, delete Schedules, and archive Workspaces before revoking the offline Host.
       responses:
         '204': {description: Offline Host revoked}
+        '409': {description: Host is online or has dependencies without cascade}
   /workspaces:
     get:
       operationId: listWorkspaces
@@ -514,6 +521,8 @@ components:
         visibility: {enum: [private, org]}
         status: {type: string}
         runtimeType: {type: string}
+        runtimeSessionMode: {enum: [new, resume]}
+        runtimeSessionRef: {type: string, maxLength: 256}
         updatedAt: {type: string, format: date-time}
     CreateBoxRequest:
       type: object
@@ -524,6 +533,8 @@ components:
         model: {type: string, maxLength: 128}
         hostId: {type: string, format: uuid}
         workspaceId: {type: string, format: uuid}
+        runtimeSessionMode: {enum: [new, resume]}
+        runtimeSessionRef: {type: string, maxLength: 256}
     BoxSnapshot:
       allOf:
         - {$ref: '#/components/schemas/Box'}

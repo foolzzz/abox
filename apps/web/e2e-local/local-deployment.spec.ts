@@ -123,3 +123,32 @@ test("live Agent creation reports OMP, Codex, and Claude as available", async ({
   await expect(dialog.getByText("1 online host(s) available", { exact: true })).toHaveCount(3);
   await expect(dialog.getByText("Unavailable", { exact: true })).toHaveCount(0);
 });
+
+test("live API allows duplicate Claude resume references across Boxes", async ({ page }) => {
+  const sessionRef = "3f8f5ddb-c916-421b-8e21-4423a0a96af6";
+  const result = await page.evaluate(async (resumeRef) => {
+    const request = async (path: string, init?: RequestInit) => {
+      const response = await fetch(`/api/v1${path}`, init);
+      if (!response.ok) throw new Error(`${init?.method ?? "GET"} ${path} failed: ${response.status}`);
+      return response.status === 204 ? undefined : response.json();
+    };
+    const [hosts, workspaces] = await Promise.all([request("/hosts"), request("/workspaces")]);
+    const host = hosts.find((candidate: { status: string; runtimes: string[] }) => candidate.status === "online" && candidate.runtimes.includes("claude"));
+    const workspace = workspaces.find((candidate: { hostId: string; status: string }) => candidate.hostId === host?.id && candidate.status === "ready");
+    if (!host || !workspace) throw new Error("live resume E2E requires an online Claude Host and ready Workspace");
+    const suffix = Date.now();
+    const agent = await request("/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `Resume E2E Agent ${suffix}`, runtimeType: "claude", model: "claude-opus-4-6", systemPrompt: "" }) });
+    const boxes: Array<{ id: string; runtimeSessionMode: string; runtimeSessionRef: string }> = [];
+    try {
+      for (const part of ["A", "B"]) {
+        const box = await request("/boxes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `Resume E2E ${suffix} ${part}`, agentId: agent.id, hostId: host.id, workspaceId: workspace.id, runtimeSessionMode: "resume", runtimeSessionRef: resumeRef }) });
+        boxes.push(box);
+      }
+      return boxes.map((box) => ({ mode: box.runtimeSessionMode, ref: box.runtimeSessionRef }));
+    } finally {
+      for (const box of boxes) await request(`/boxes/${box.id}`, { method: "DELETE" });
+      await request(`/agents/${agent.id}`, { method: "DELETE" });
+    }
+  }, sessionRef);
+  expect(result).toEqual([{ mode: "resume", ref: sessionRef }, { mode: "resume", ref: sessionRef }]);
+});

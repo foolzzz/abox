@@ -82,6 +82,16 @@ test("Host delete controls expose the offline prerequisite and allow offline del
   expect(api.deletes).toEqual(["/hosts/host-offline"]);
 });
 
+test("offline Host deletion can cascade dependent resources", async ({ page }) => {
+  const api = await installAdminApi(page);
+  await page.goto("/hosts");
+  await page.getByRole("button", { name: "Delete Offline Host", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("checkbox", { name: /Also terminate dependent Boxes/ }).check();
+  await dialog.getByRole("button", { name: "Delete host and dependencies", exact: true }).click();
+  expect(api.hostCascadeDeletes).toEqual(["/hosts/host-offline"]);
+});
+
 test("Agent delete control stays on the card and opens a working confirmation modal", async ({ page }) => {
   const api = await installAdminApi(page);
 
@@ -125,12 +135,13 @@ test("Workspace row exposes sharing and deletion controls with their modals", as
   expect(api.deletes).toEqual(["/workspaces/workspace-project"]);
 });
 
-test("ordinary users do not receive administrator deletion controls", async ({ page }) => {
+test("ordinary Box owners can manage only their own filtered Box", async ({ page }) => {
   await installUserApi(page);
 
   await page.goto("/boxes");
-  await expect(page.getByRole("button", { name: "Delete Owned Box", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("checkbox", { name: /^Select / })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Developer Box", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete Developer Box", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Owned Box", exact: true })).toHaveCount(0);
 
   await page.goto("/hosts");
   await expect(page.getByRole("button", { name: /^Delete / })).toHaveCount(0);
@@ -142,6 +153,21 @@ test("ordinary users do not receive administrator deletion controls", async ({ p
   await expect(page.getByRole("button", { name: "Delete Project Workspace", exact: true })).toHaveCount(0);
 });
 
+test("Box list defaults to the current owner and can filter other users", async ({ page }) => {
+  await installAdminApi(page);
+  await page.goto("/boxes");
+  const owner = page.getByRole("combobox", { name: "Filter by owner", exact: true });
+  await expect(owner).toHaveValue("me");
+  await expect(page.getByRole("heading", { name: "Owned Box", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Developer Box", exact: true })).toHaveCount(0);
+  await owner.selectOption("user-developer");
+  await expect(page.getByRole("heading", { name: "Developer Box", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Owned Box", exact: true })).toHaveCount(0);
+  await owner.selectOption("all");
+  await expect(page.getByRole("heading", { name: "Owned Box", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Developer Box", exact: true })).toBeVisible();
+});
+
 test("Agent Box creation auto-registers an unregistered path in one submit", async ({ page }) => {
   const api = await installAdminApi(page);
 
@@ -151,6 +177,7 @@ test("Agent Box creation auto-registers an unregistered path in one submit", asy
   await expect(dialog.getByRole("group", { name: "Project directory", exact: true })).toBeVisible();
   await expect(dialog.getByText("Creation progress", { exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Choose project directory", exact: true })).toHaveCount(0);
+  await dialog.getByRole("combobox").first().selectOption("agent-primary");
 
   await dialog.getByLabel("Box name").fill("One Step Box");
   await dialog.getByLabel("Local project directory").fill("/srv/one-step");
@@ -158,7 +185,41 @@ test("Agent Box creation auto-registers an unregistered path in one submit", asy
 
   await expect(page).toHaveURL(/\/boxes\/box-created\/agent-terminal$/);
   expect(api.workspaceCreates).toEqual([{ hostId: "host-online", name: "one-step", path: "/srv/one-step" }]);
-  expect(api.boxCreates).toEqual([{ name: "One Step Box", agentId: "agent-primary", hostId: "host-online", workspaceId: "workspace-created" }]);
+  expect(api.boxCreates).toEqual([{ name: "One Step Box", agentId: "agent-primary", hostId: "host-online", workspaceId: "workspace-created", runtimeSessionMode: "new" }]);
+});
+
+test("duplicate Claude session references can be resumed by multiple Boxes", async ({ page }) => {
+  const api = await installAdminApi(page);
+  const sessionRef = "3f8f5ddb-c916-421b-8e21-4423a0a96af6";
+  for (const name of ["Resume Claude A", "Resume Claude B"]) {
+    await page.goto("/boxes?create=1");
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("combobox").first().selectOption("agent-claude");
+    await dialog.getByRole("radio", { name: "Resume an existing session", exact: true }).check();
+    await dialog.getByLabel("Claude session ID", { exact: true }).fill(sessionRef);
+    await dialog.getByLabel("Box name").fill(name);
+    await dialog.getByLabel("Local project directory").fill(`/srv/${name.endsWith("A") ? "resume-a" : "resume-b"}`);
+    await dialog.getByRole("button", { name: "Create box", exact: true }).click();
+    await expect(page).toHaveURL(/\/boxes\/box-created\/agent-terminal$/);
+  }
+  expect(api.boxCreates.map((request) => ({ mode: request.runtimeSessionMode, ref: request.runtimeSessionRef }))).toEqual([
+    { mode: "resume", ref: sessionRef },
+    { mode: "resume", ref: sessionRef }
+  ]);
+});
+
+test("Agent creation hides System Prompt and prefills Runtime model defaults", async ({ page }) => {
+  const api = await installAdminApi(page);
+  await page.goto("/agents?create=1");
+  const dialog = page.getByRole("dialog");
+  const model = dialog.locator('input[list^="agent-model-suggestions-"]');
+  await expect(model).toHaveValue("gpt-5.6-sol");
+  await expect(dialog.getByRole("textbox", { name: /System Prompt/i })).toHaveCount(0);
+  await dialog.getByRole("radio", { name: /^Claude / }).check();
+  await expect(model).toHaveValue("claude-opus-4-6");
+  await dialog.getByLabel("Name").fill("Default Claude Agent");
+  await dialog.getByRole("button", { name: "New agent", exact: true }).click();
+  expect(api.agentCreates).toEqual([{ name: "Default Claude Agent", runtimeType: "claude", model: "claude-opus-4-6", systemPrompt: "" }]);
 });
 
 test("Agent creation shows every Runtime advertised by an online Host as available", async ({ page }) => {
