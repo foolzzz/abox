@@ -33,16 +33,16 @@ type terminalSession struct {
 }
 
 type TerminalManager struct {
-	guard       *WorkspaceGuard
-	tmuxBinary  string
-	maxSessions int
-	emit        func(*hostv1.TerminalData) error
-
-	mu       sync.Mutex
-	sessions map[string]*terminalSession
+	guard        *WorkspaceGuard
+	tmuxBinary   string
+	claudeBinary string
+	maxSessions  int
+	emit         func(*hostv1.TerminalData) error
+	mu           sync.Mutex
+	sessions     map[string]*terminalSession
 }
 
-func NewTerminalManager(guard *WorkspaceGuard, tmuxBinary string, maxSessions int, emit func(*hostv1.TerminalData) error) (*TerminalManager, error) {
+func NewTerminalManager(guard *WorkspaceGuard, tmuxBinary, claudeBinary string, maxSessions int, emit func(*hostv1.TerminalData) error) (*TerminalManager, error) {
 	if guard == nil || emit == nil {
 		return nil, errors.New("workspace guard and terminal emitter are required")
 	}
@@ -53,12 +53,16 @@ func NewTerminalManager(guard *WorkspaceGuard, tmuxBinary string, maxSessions in
 	if err != nil {
 		return nil, fmt.Errorf("resolve tmux binary: %w", err)
 	}
+	if strings.TrimSpace(claudeBinary) == "" {
+		claudeBinary = "claude"
+	}
 	return &TerminalManager{
-		guard:       guard,
-		tmuxBinary:  resolvedTmux,
-		maxSessions: maxSessions,
-		emit:        emit,
-		sessions:    make(map[string]*terminalSession),
+		guard:        guard,
+		tmuxBinary:   resolvedTmux,
+		claudeBinary: strings.TrimSpace(claudeBinary),
+		maxSessions:  maxSessions,
+		emit:         emit,
+		sessions:     make(map[string]*terminalSession),
 	}, nil
 }
 
@@ -189,9 +193,19 @@ func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, w
 	if m.tmuxSessionExists(ctx, sessionName) {
 		return nil
 	}
+	if runtimeType == "claude" && strings.EqualFold(strings.TrimSpace(sessionMode), "attach") {
+		resolvedReference, resolveErr := resolveClaudeBackgroundJobReference(ctx, m.claudeBinary, sessionRef)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		sessionRef = resolvedReference
+	}
 	runtimeCommand, err := agentRuntimeCommand(runtimeType, model, sessionMode, sessionRef)
 	if err != nil {
 		return err
+	}
+	if runtimeType == "claude" {
+		runtimeCommand[0] = m.claudeBinary
 	}
 	args := []string{"new-session", "-d", "-s", sessionName, "-c", workspace, "--"}
 	args = append(args, runtimeCommand...)

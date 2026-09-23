@@ -354,7 +354,7 @@ function CreateBoxModal({
         onWorkspaceCreated(workspace);
         targetWorkspaceId = workspace.id;
       }
-      const box = await api.createBox({ name: name.trim(), agentId: selectedAgentId, hostId: selectedHostId, workspaceId: targetWorkspaceId, runtimeSessionMode, runtimeSessionRef: runtimeSessionMode === "resume" ? runtimeSessionRef.trim() : undefined });
+      const box = await api.createBox({ name: name.trim(), agentId: selectedAgentId, hostId: selectedHostId, workspaceId: targetWorkspaceId, runtimeSessionMode, runtimeSessionRef: runtimeSessionMode === "new" ? undefined : runtimeSessionRef.trim() });
       notify(`${box.name} was created.`);
       setName("");
       setAgentId("");
@@ -377,7 +377,7 @@ function CreateBoxModal({
     : selectedHostId !== "" && selectedWorkspaceId !== "" && canUseSelectedWorkspace;
   const runtimeSessionReady = runtimeSessionMode === "new" || runtimeSessionRef.trim() !== "";
   const normalizedSessionSearch = sessionSearch.trim().toLowerCase();
-  const filteredRuntimeSessions = runtimeSessions.filter((session) => !normalizedSessionSearch || `${session.name} ${session.workspace ?? ""} ${session.sessionRef}`.toLowerCase().includes(normalizedSessionSearch));
+  const filteredRuntimeSessions = runtimeSessions.filter((session) => session.status !== "interactive" && (!normalizedSessionSearch || `${session.name} ${session.workspace ?? ""} ${session.sessionRef}`.toLowerCase().includes(normalizedSessionSearch)));
   const chooseRuntimeSession = (session: RuntimeSession) => {
     setRuntimeSessionRef(session.sessionRef);
     setRuntimeSessionMode(session.running ? "attach" : "resume");
