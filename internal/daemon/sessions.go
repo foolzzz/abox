@@ -90,7 +90,7 @@ func resolveClaudeBackgroundJobReference(ctx context.Context, claudeBinary, refe
 			return strings.TrimSpace(agent.ID), nil
 		}
 	}
-	return "", fmt.Errorf("Claude session %q is not an attachable background session", reference)
+	return "", fmt.Errorf("claude session %q is not an attachable background session", reference)
 }
 
 func isClaudeBackgroundKind(kind string) bool {
