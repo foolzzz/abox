@@ -222,6 +222,34 @@ test("Agent creation hides System Prompt and prefills Runtime model defaults", a
   expect(api.agentCreates).toEqual([{ name: "Default Claude Agent", runtimeType: "claude", model: "claude-opus-4-6", systemPrompt: "" }]);
 });
 
+test("Claude session picker searches local sessions and maps the Workspace path", async ({ page }) => {
+  await installAdminApi(page);
+  await page.goto("/boxes?create=1");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("combobox").first().selectOption("agent-claude");
+  await dialog.getByRole("radio", { name: "Resume an existing session", exact: true }).check();
+  const search = dialog.getByLabel("Find local Claude session", { exact: true });
+  await expect(dialog.getByRole("button", { name: "Choose session Project Session", exact: true })).toBeVisible();
+  await search.fill("Other");
+  await expect(dialog.getByRole("button", { name: "Choose session Project Session", exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Choose session Other Session", exact: true })).toBeVisible();
+  await search.fill("");
+  await dialog.getByRole("button", { name: "Choose session Project Session", exact: true }).click();
+  await expect(dialog.getByLabel("Claude session ID", { exact: true })).toHaveValue("11111111-1111-4111-8111-111111111111");
+  await expect(dialog.getByLabel("Local project directory")).toHaveValue("/srv/project");
+});
+
+test("Claude session discovery failure preserves manual Session ID fallback", async ({ page }) => {
+  await installAdminApi(page, { sessionDiscoveryFailure: "Host discovery failed" });
+  await page.goto("/boxes?create=1");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("combobox").first().selectOption("agent-claude");
+  await dialog.getByRole("radio", { name: "Resume an existing session", exact: true }).check();
+  await expect(dialog.getByText(/Session discovery is unavailable/)).toBeVisible();
+  await dialog.getByLabel("Claude session ID", { exact: true }).fill("33333333-3333-4333-8333-333333333333");
+  await expect(dialog.getByLabel("Claude session ID", { exact: true })).toBeEditable();
+});
+
 test("Agent creation shows every Runtime advertised by an online Host as available", async ({ page }) => {
   await installAdminApi(page);
   await page.goto("/agents?create=1");

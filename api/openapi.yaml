@@ -178,6 +178,28 @@ paths:
       responses:
         '204': {description: Offline Host revoked}
         '409': {description: Host is online or has dependencies without cascade}
+  /hosts/{hostId}/runtime-sessions:
+    parameters:
+      - name: hostId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      operationId: listRuntimeSessions
+      parameters:
+        - name: runtime
+          in: query
+          required: false
+          schema: {type: string, default: claude}
+      responses:
+        '200':
+          description: Runtime sessions stored on the Host
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/RuntimeSession'}
+        '503': {description: Host is offline or discovery timed out}
   /workspaces:
     get:
       operationId: listWorkspaces
@@ -535,6 +557,17 @@ components:
         workspaceId: {type: string, format: uuid}
         runtimeSessionMode: {enum: [new, resume]}
         runtimeSessionRef: {type: string, maxLength: 256}
+    RuntimeSession:
+      type: object
+      required: [sessionRef, runtimeType, name, status, running, updatedAt]
+      properties:
+        sessionRef: {type: string}
+        runtimeType: {type: string}
+        workspace: {type: string}
+        name: {type: string}
+        status: {type: string}
+        running: {type: boolean}
+        updatedAt: {type: string, format: date-time}
     BoxSnapshot:
       allOf:
         - {$ref: '#/components/schemas/Box'}

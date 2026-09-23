@@ -20,6 +20,7 @@ import type {
   PendingWorkspaceDiff,
   ReplaceAccessControlRequest,
   ResetPasswordRequest,
+  RuntimeSession,
   Schedule,
   ScheduleExecution,
   SubagentInstance,
@@ -139,6 +140,8 @@ export const api = {
   listHosts: (signal?: AbortSignal) => request<Host[]>("/hosts", { signal }),
   deleteHost: (hostId: string, cascade = false, signal?: AbortSignal) =>
     request<void>(`/hosts/${encode(hostId)}${cascade ? "?cascade=true" : ""}`, { method: "DELETE", signal }),
+  listRuntimeSessions: (hostId: string, runtime = "claude", signal?: AbortSignal) =>
+    request<RuntimeSession[]>(`/hosts/${encode(hostId)}/runtime-sessions?runtime=${encode(runtime)}`, { signal }),
   listWorkspaces: (signal?: AbortSignal) => request<Workspace[]>("/workspaces", { signal }),
   getWorkspace: (workspaceId: string, signal?: AbortSignal) =>
     request<Workspace>(`/workspaces/${encode(workspaceId)}`, { signal }),

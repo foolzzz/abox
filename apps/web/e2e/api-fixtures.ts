@@ -1,5 +1,5 @@
 import type { Page, Route } from "@playwright/test";
-import type { AccessControlEntry, Agent, Box, Host, Member, Meta, Team, Workspace } from "../src/api/types";
+import type { AccessControlEntry, Agent, Box, Host, Member, Meta, RuntimeSession, Team, Workspace } from "../src/api/types";
 
 const NOW = "2026-01-15T12:00:00.000Z";
 
@@ -127,6 +127,11 @@ export const boxes: Box[] = [
   }
 ];
 
+export const runtimeSessions: RuntimeSession[] = [
+  { sessionRef: "11111111-1111-4111-8111-111111111111", runtimeType: "claude", workspace: "/srv/project", name: "Project Session", status: "stopped", running: false, updatedAt: NOW },
+  { sessionRef: "22222222-2222-4222-8222-222222222222", runtimeType: "claude", workspace: "/srv/other", name: "Other Session", status: "running", running: true, updatedAt: NOW }
+];
+
 const members: Member[] = [
   {
     id: "user-admin",
@@ -180,6 +185,7 @@ interface ApiFixtureOptions {
   deleteFailures?: Record<string, string>;
   meta?: Meta;
   hostResponses?: Host[][];
+  sessionDiscoveryFailure?: string;
 }
 
 export interface ApiObservations {
@@ -221,6 +227,10 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
     const method = request.method();
     const requestURL = new URL(request.url());
     const path = requestURL.pathname.replace(/^\/api\/v1/, "");
+    if (method === "GET" && path === "/hosts/host-online/runtime-sessions") {
+      if (options.sessionDiscoveryFailure) return json(route, { message: options.sessionDiscoveryFailure }, 503);
+      return json(route, runtimeSessions);
+    }
     if (method === "GET" && path === "/boxes") return json(route, meta.currentUser.role === "admin" ? boxes : boxes.filter((box) => box.ownerUserId === meta.currentUser.id || box.visibility === "org"));
     if (method === "GET" && path === "/meta") return json(route, meta);
     if (method === "GET" && path === "/notifications") return json(route, []);

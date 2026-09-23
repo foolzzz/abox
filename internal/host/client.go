@@ -78,6 +78,10 @@ type TerminalHandler interface {
 	HandleTerminal(ctx context.Context, input *hostv1.TerminalInput) error
 }
 
+type RuntimeSessionHandler interface {
+	HandleRuntimeSessionQuery(ctx context.Context, query *hostv1.RuntimeSessionQuery) *hostv1.RuntimeSessionList
+}
+
 type ConnectionObserver interface {
 	Connected(welcome *hostv1.Welcome)
 	Disconnected(err error)
@@ -126,21 +130,23 @@ type Client struct {
 	terminalMu        sync.RWMutex
 	terminalHandler   TerminalHandler
 
-	hostID            string
-	enrollmentToken   string
-	daemonInstanceID  string
-	daemonVersion     string
-	hostName          string
-	systemHostname    string
-	os                string
-	arch              string
-	runtimes          []*hostv1.RuntimeCapability
-	workspaceRoots    []*hostv1.WorkspaceRoot
-	heartbeatInterval time.Duration
-	backoff           Backoff
-	newFrameID        FrameIDGenerator
-	sleep             SleepFunc
-	prepareReconnect  func()
+	runtimeSessionMu      sync.RWMutex
+	runtimeSessionHandler RuntimeSessionHandler
+	hostID                string
+	enrollmentToken       string
+	daemonInstanceID      string
+	daemonVersion         string
+	hostName              string
+	systemHostname        string
+	os                    string
+	arch                  string
+	runtimes              []*hostv1.RuntimeCapability
+	workspaceRoots        []*hostv1.WorkspaceRoot
+	heartbeatInterval     time.Duration
+	backoff               Backoff
+	newFrameID            FrameIDGenerator
+	sleep                 SleepFunc
+	prepareReconnect      func()
 
 	notify      chan struct{}
 	asyncErrors chan error
@@ -233,6 +239,12 @@ func (c *Client) SetTerminalHandler(handler TerminalHandler) {
 	c.terminalMu.Lock()
 	c.terminalHandler = handler
 	c.terminalMu.Unlock()
+}
+
+func (c *Client) SetRuntimeSessionHandler(handler RuntimeSessionHandler) {
+	c.runtimeSessionMu.Lock()
+	c.runtimeSessionHandler = handler
+	c.runtimeSessionMu.Unlock()
 }
 
 func (c *Client) PublishTerminalData(ctx context.Context, data *hostv1.TerminalData) (uint64, error) {
@@ -574,6 +586,23 @@ func (c *Client) receiveLoop(sessionCtx, commandCtx context.Context, stream host
 			}
 			if err := handler.HandleTerminal(commandCtx, proto.Clone(payload.TerminalInput).(*hostv1.TerminalInput)); err != nil {
 				return protocolError("handle terminal input", CodeCommand, err)
+			}
+		case *hostv1.ServerFrame_RuntimeSessionQuery:
+			c.runtimeSessionMu.RLock()
+			handler := c.runtimeSessionHandler
+			c.runtimeSessionMu.RUnlock()
+			if handler == nil {
+				return protocolError("handle runtime session query", CodeConfiguration, errors.New("runtime session handler is not configured"))
+			}
+			result := handler.HandleRuntimeSessionQuery(commandCtx, proto.Clone(payload.RuntimeSessionQuery).(*hostv1.RuntimeSessionQuery))
+			if result == nil {
+				return protocolError("handle runtime session query", CodeProtocol, errors.New("runtime session handler returned nil"))
+			}
+			if result.RequestId == "" {
+				result.RequestId = payload.RuntimeSessionQuery.RequestId
+			}
+			if _, err := c.enqueue(&hostv1.HostFrame{Payload: &hostv1.HostFrame_RuntimeSessionList{RuntimeSessionList: result}}); err != nil {
+				return err
 			}
 		case *hostv1.ServerFrame_Welcome:
 			return protocolError("receive server frame", CodeProtocol, errors.New("unexpected welcome on established stream"))

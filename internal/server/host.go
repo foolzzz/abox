@@ -25,10 +25,11 @@ import (
 )
 
 type hostConnection struct {
-	hostID   string
-	outbound chan *domain.HostCommand
-	terminal chan *hostv1.TerminalInput
-	cancel   context.CancelCauseFunc
+	hostID         string
+	outbound       chan *domain.HostCommand
+	terminal       chan *hostv1.TerminalInput
+	sessionQueries chan *hostv1.RuntimeSessionQuery
+	cancel         context.CancelCauseFunc
 }
 
 type hostHub struct {
@@ -109,6 +110,23 @@ func (h *hostHub) sendTerminal(hostID string, input *hostv1.TerminalInput) bool 
 	}
 }
 
+func (h *hostHub) sendRuntimeSessionQuery(hostID string, query *hostv1.RuntimeSessionQuery) bool {
+	h.mu.RLock()
+	connection := h.connections[hostID]
+	if connection == nil {
+		h.mu.RUnlock()
+		return false
+	}
+	select {
+	case connection.sessionQueries <- query:
+		h.mu.RUnlock()
+		return true
+	default:
+		h.mu.RUnlock()
+		return false
+	}
+}
+
 type receivedHostFrame struct {
 	frame *hostv1.HostFrame
 	err   error
@@ -135,10 +153,11 @@ func (s *Server) Connect(stream hostv1.HostService_ConnectServer) error {
 
 	connectionContext, cancel := context.WithCancelCause(stream.Context())
 	connection := &hostConnection{
-		hostID:   persisted.ID,
-		outbound: make(chan *domain.HostCommand, 256),
-		terminal: make(chan *hostv1.TerminalInput, 256),
-		cancel:   cancel,
+		hostID:         persisted.ID,
+		outbound:       make(chan *domain.HostCommand, 256),
+		terminal:       make(chan *hostv1.TerminalInput, 256),
+		sessionQueries: make(chan *hostv1.RuntimeSessionQuery, 32),
+		cancel:         cancel,
 	}
 	s.hosts.register(connection)
 	lastAcked := hello.GetLastAckedHostSeq()
@@ -236,6 +255,13 @@ func (s *Server) Connect(stream hostv1.HostService_ConnectServer) error {
 				Payload: &hostv1.ServerFrame_TerminalInput{TerminalInput: terminal},
 			}); err != nil {
 				return grpcStatus("send terminal input", err)
+			}
+		case query := <-connection.sessionQueries:
+			if err := stream.Send(&hostv1.ServerFrame{
+				FrameId: uuid.NewString(),
+				Payload: &hostv1.ServerFrame_RuntimeSessionQuery{RuntimeSessionQuery: query},
+			}); err != nil {
+				return grpcStatus("send runtime session query", err)
 			}
 		case timestamp := <-ping.C:
 			if err := stream.Send(&hostv1.ServerFrame{
@@ -421,6 +447,8 @@ func (s *Server) processHostFrame(ctx context.Context, host domain.Host, daemonI
 		}
 	case frame.GetTerminalData() != nil:
 		s.terminals.publish(frame.GetTerminalData())
+	case frame.GetRuntimeSessionList() != nil:
+		s.runtimeSessions.publish(frame.GetRuntimeSessionList())
 	default:
 		return lastAcked, status.Error(codes.InvalidArgument, "host frame payload is required")
 	}

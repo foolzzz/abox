@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-22
+
+### Added
+
+- Admin 新建 Claude Box 时可查询所选 Host 的本地 Claude Session，按名称、Workspace 或 Session ID 搜索并一键选择。
+- daemon 只读取 Claude Session 最小元数据，合并 `~/.claude/projects` 历史与 `~/.claude/sessions` 运行状态；发现失败时保留手动 Session ID 回退。
+
+
 ## [0.5.0] - 2026-09-22
 
 
@@ -147,7 +155,8 @@
 - Host Credential、幂等 Command、Event Journal/Ack 和 PostgreSQL 约束用于保护控制面与 daemon 通信。
 - Runtime Secret 仅引用 Host 环境，不在 Control Plane 保存明文。
 
-[Unreleased]: https://github.com/foolzzz/abox/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/foolzzz/abox/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/foolzzz/abox/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/foolzzz/abox/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/foolzzz/abox/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/foolzzz/abox/compare/v0.4.1...v0.4.2
