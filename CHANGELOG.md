@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-22
+
+### Added
+
+- 运行中的 Claude Background Session 可通过 `claude attach <id>` 被多个 Box 重复 Attach；每个 Box 保留独立 AgentBox tmux 和浏览器 Client。
+- 新增持久化 Attachment 记录、共享输入策略状态、可见 Attachment 数量、Box Detach 和 Admin 全局 Stop。
+
+### Changed
+
+- 删除 Box 或执行 Detach 只移除当前 Attachment，不停止共享 Claude Session；全局 Stop 是单独的 Admin 操作，并将所有关联 Box 转换为可 Resume 状态。
+
+
 ## [0.6.0] - 2026-09-22
 
 ### Added
@@ -155,7 +167,8 @@
 - Host Credential、幂等 Command、Event Journal/Ack 和 PostgreSQL 约束用于保护控制面与 daemon 通信。
 - Runtime Secret 仅引用 Host 环境，不在 Control Plane 保存明文。
 
-[Unreleased]: https://github.com/foolzzz/abox/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/foolzzz/abox/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/foolzzz/abox/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/foolzzz/abox/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/foolzzz/abox/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/foolzzz/abox/compare/v0.4.2...v0.4.3

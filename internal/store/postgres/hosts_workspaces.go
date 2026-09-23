@@ -136,6 +136,11 @@ func (s *Store) DeleteHost(ctx context.Context, user domain.User, hostID string,
 				return mapError("exit host runtimes", err)
 			}
 			if _, err := tx.Exec(ctx, `
+                UPDATE runtime_session_attachments SET status = 'detached', detached_at = COALESCE(detached_at, now())
+                WHERE organization_id = $1 AND host_id = $2 AND status = 'active'`, organizationID, hostID); err != nil {
+				return mapError("detach host runtime sessions", err)
+			}
+			if _, err := tx.Exec(ctx, `
                 UPDATE boxes SET status = 'terminated', terminated_at = COALESCE(terminated_at, now()),
                     updated_at = now(), last_activity_at = now(), version = version + 1
                 WHERE organization_id = $1 AND host_id = $2 AND status <> 'terminated'`, organizationID, hostID); err != nil {

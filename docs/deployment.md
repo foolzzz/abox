@@ -1,6 +1,6 @@
 # AgentBox 部署指南
 
-本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.6.0`。
+本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.7.0`。
 
 ## 1. 部署拓扑
 
@@ -72,16 +72,16 @@ claude --version
 Release 页面：
 
 ```text
-https://github.com/foolzzz/abox/releases/tag/v0.6.0
+https://github.com/foolzzz/abox/releases/tag/v0.7.0
 ```
 
 根据操作系统和架构下载：
 
 ```text
-agentbox-0.6.0-darwin-arm64.tar.gz
-agentbox-0.6.0-darwin-amd64.tar.gz
-agentbox-0.6.0-linux-arm64.tar.gz
-agentbox-0.6.0-linux-amd64.tar.gz
+agentbox-0.7.0-darwin-arm64.tar.gz
+agentbox-0.7.0-darwin-amd64.tar.gz
+agentbox-0.7.0-linux-arm64.tar.gz
+agentbox-0.7.0-linux-amd64.tar.gz
 checksums.txt
 ```
 
@@ -90,13 +90,13 @@ checksums.txt
 macOS：
 
 ```bash
-shasum -a 256 agentbox-0.6.0-darwin-arm64.tar.gz
+shasum -a 256 agentbox-0.7.0-darwin-arm64.tar.gz
 ```
 
 Linux：
 
 ```bash
-sha256sum agentbox-0.6.0-linux-amd64.tar.gz
+sha256sum agentbox-0.7.0-linux-amd64.tar.gz
 ```
 
 输出必须与 `checksums.txt` 中对应文件一致。
@@ -104,8 +104,8 @@ sha256sum agentbox-0.6.0-linux-amd64.tar.gz
 解压：
 
 ```bash
-tar -xzf agentbox-0.6.0-<os>-<arch>.tar.gz
-cd agentbox-0.6.0-<os>-<arch>
+tar -xzf agentbox-0.7.0-<os>-<arch>.tar.gz
+cd agentbox-0.7.0-<os>-<arch>
 ```
 
 ## 4. 安装文件
@@ -187,7 +187,7 @@ docker exec agentbox-postgres pg_isready -U agentbox -d agentbox
   "publicUrl": "http://127.0.0.1:8080",
   "enrollmentToken": "<random-enrollment-token>",
   "webDir": "~/.agentbox/web",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "approvalPollInterval": "1s",
   "hibernationPollInterval": "30s",
   "schedulePollInterval": "1s",
@@ -388,6 +388,10 @@ claude --resume <session-id>
 Box 列表默认只显示当前用户创建的 Box，可以通过 Owner 筛选切换其他 Organization 用户或全部可见 Box。
 
 Host 可以注册任意数量 Box。`maxActiveBoxes` 只限制同时运行的 Runtime 数量，不限制 Box 记录数量。
+
+若发现结果标记为 Running，选择后 Box 使用 `claude attach <session-id>`，多个 Box 可以重复 Attach 同一个 Claude Background Session。每个 Box 和每个浏览器仍有独立 AgentBox tmux/PTY，但输入会进入同一 Claude Session，默认输入策略为 `shared`。
+
+“Detach 当前 Box”只结束当前 Box 的 Attachment 和 tmux，不停止 Claude Session，也不影响其他 Box。“为所有人停止会话”仅 Organization Admin 可用，会执行 `claude stop <session-id>`、Detach 全部 Attachment，并将关联 Box 转为 Resume 模式，之后可以重新启动该历史会话。
 
 删除 Offline Host 时可以显式选择级联依赖。级联会终止该 Host 的 Box、删除 Schedule、归档 Workspace、取消未完成运行和命令，再吊销 Host Credential；该操作不可撤销，执行前必须确认数据库备份和影响范围。
 

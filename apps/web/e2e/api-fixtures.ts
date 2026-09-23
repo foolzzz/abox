@@ -1,5 +1,5 @@
 import type { Page, Route } from "@playwright/test";
-import type { AccessControlEntry, Agent, Box, Host, Member, Meta, RuntimeSession, Team, Workspace } from "../src/api/types";
+import type { AccessControlEntry, Agent, Box, Host, Member, Meta, RuntimeSession, RuntimeSessionAttachment, Team, Workspace } from "../src/api/types";
 
 const NOW = "2026-01-15T12:00:00.000Z";
 
@@ -124,12 +124,27 @@ export const boxes: Box[] = [
     version: 1,
     createdAt: NOW,
     updatedAt: NOW
+  },
+  {
+    id: "box-shared-a", name: "Shared Box A", agentId: "agent-claude", hostId: "host-online", workspaceId: "workspace-project",
+    visibility: "private", status: "running", ownerUserId: "user-shared", runtimeType: "claude", runtimeSessionMode: "attach",
+    runtimeSessionRef: "22222222-2222-4222-8222-222222222222", version: 1, createdAt: NOW, updatedAt: NOW
+  },
+  {
+    id: "box-shared-b", name: "Shared Box B", agentId: "agent-claude", hostId: "host-online", workspaceId: "workspace-project",
+    visibility: "private", status: "running", ownerUserId: "user-shared", runtimeType: "claude", runtimeSessionMode: "attach",
+    runtimeSessionRef: "22222222-2222-4222-8222-222222222222", version: 1, createdAt: NOW, updatedAt: NOW
   }
 ];
 
 export const runtimeSessions: RuntimeSession[] = [
   { sessionRef: "11111111-1111-4111-8111-111111111111", runtimeType: "claude", workspace: "/srv/project", name: "Project Session", status: "stopped", running: false, updatedAt: NOW },
   { sessionRef: "22222222-2222-4222-8222-222222222222", runtimeType: "claude", workspace: "/srv/other", name: "Other Session", status: "running", running: true, updatedAt: NOW }
+];
+
+export const runtimeSessionAttachments: RuntimeSessionAttachment[] = [
+  { id: "attachment-a", boxId: "box-shared-a", boxName: "Shared Box A", hostId: "host-online", runtimeType: "claude", sessionRef: "22222222-2222-4222-8222-222222222222", attachMode: "attach", inputPolicy: "shared", status: "active", attachedAt: NOW },
+  { id: "attachment-b", boxId: "box-shared-b", boxName: "Shared Box B", hostId: "host-online", runtimeType: "claude", sessionRef: "22222222-2222-4222-8222-222222222222", attachMode: "attach", inputPolicy: "shared", status: "active", attachedAt: NOW }
 ];
 
 const members: Member[] = [
@@ -154,7 +169,8 @@ const members: Member[] = [
     hasPassword: true,
     mustChangePassword: false,
     createdAt: NOW
-  }
+  },
+  { id: "user-shared", organizationId: "org-e2e", login: "shared", displayName: "Shared User", role: "user", status: "active", hasPassword: true, mustChangePassword: false, createdAt: NOW }
 ];
 
 const teams: Team[] = [
@@ -194,6 +210,8 @@ export interface ApiObservations {
   workspaceCreates: Array<Record<string, unknown>>;
   deletes: string[];
   hostCascadeDeletes: string[];
+  detachedSessions: string[];
+  stoppedSessions: string[];
 }
 
 export function installUserApi(page: Page): Promise<ApiObservations> {
@@ -212,6 +230,8 @@ export function installUserApi(page: Page): Promise<ApiObservations> {
 }
 export async function installAdminApi(page: Page, options: ApiFixtureOptions = {}): Promise<ApiObservations> {
   const observations: ApiObservations = {
+    detachedSessions: [],
+    stoppedSessions: [],
     agentCreates: [],
     boxCreates: [],
     workspaceCreates: [],
@@ -233,6 +253,15 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
     }
     if (method === "GET" && path === "/boxes") return json(route, meta.currentUser.role === "admin" ? boxes : boxes.filter((box) => box.ownerUserId === meta.currentUser.id || box.visibility === "org"));
     if (method === "GET" && path === "/meta") return json(route, meta);
+    if (method === "GET" && path === "/boxes/box-shared-a/runtime-session/attachments") return json(route, runtimeSessionAttachments);
+    if (method === "POST" && path === "/boxes/box-shared-a/runtime-session/detach") {
+      observations.detachedSessions.push("box-shared-a");
+      return json(route, {});
+    }
+    if (method === "POST" && path === "/boxes/box-shared-a/runtime-session/stop") {
+      observations.stoppedSessions.push("box-shared-a");
+      return json(route, {});
+    }
     if (method === "GET" && path === "/notifications") return json(route, []);
     if (method === "GET" && path === "/agents") return json(route, agents);
     if (method === "GET" && path === "/hosts") {
@@ -241,6 +270,7 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
       return json(route, values);
     }
     if (method === "GET" && path === "/workspaces") return json(route, workspaces);
+    if (method === "GET" && path === "/boxes/box-shared-a") return json(route, { ...boxes.find((box) => box.id === "box-shared-a"), lastEventSeq: 0, activeRunId: null, run: null });
     if (method === "GET" && path === "/boxes") return json(route, boxes);
     if (method === "GET" && path === "/members") return json(route, members);
     if (method === "GET" && path === "/workspaces/workspace-project/acl") return json(route, workspaceAcl);

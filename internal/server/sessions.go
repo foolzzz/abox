@@ -106,3 +106,66 @@ func (s *Server) handleListRuntimeSessions(writer http.ResponseWriter, request *
 	}
 	writeJSON(writer, http.StatusOK, sessions)
 }
+
+func (s *Server) handleListRuntimeSessionAttachments(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	attachments, err := s.store.ListRuntimeSessionAttachments(request.Context(), user, chi.URLParam(request, "boxID"))
+	if err != nil {
+		s.writeStoreError(writer, "list runtime session attachments", err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, attachments)
+}
+
+func (s *Server) handleDetachRuntimeSession(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	boxID := chi.URLParam(request, "boxID")
+	box, err := s.store.GetBox(request.Context(), user, boxID)
+	if err != nil {
+		s.writeStoreError(writer, "load detached session box", err)
+		return
+	}
+	if err := s.store.DetachRuntimeSession(request.Context(), user, boxID); err != nil {
+		s.writeStoreError(writer, "detach runtime session", err)
+		return
+	}
+	s.terminateAgentTerminal(box)
+	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleStopRuntimeSession(writer http.ResponseWriter, request *http.Request) {
+	user, _ := requestUser(request)
+	boxID := chi.URLParam(request, "boxID")
+	box, err := s.store.GetBox(request.Context(), user, boxID)
+	if err != nil {
+		s.writeStoreError(writer, "load stopped session box", err)
+		return
+	}
+	if strings.TrimSpace(box.RuntimeSessionRef) == "" {
+		writeProblem(writer, http.StatusConflict, "runtime_session_missing", "box has no external runtime session")
+		return
+	}
+	requestID := uuid.NewString()
+	ctx, cancel := context.WithTimeout(request.Context(), 15*time.Second)
+	defer cancel()
+	result, err := s.runtimeSessions.wait(ctx, requestID, func() bool {
+		return s.hosts.sendRuntimeSessionQuery(box.HostID, &hostv1.RuntimeSessionQuery{RequestId: requestID, RuntimeType: box.RuntimeType, Action: "stop", SessionRef: box.RuntimeSessionRef})
+	})
+	if err != nil {
+		writeProblem(writer, http.StatusServiceUnavailable, "runtime_session_stop_unavailable", err.Error())
+		return
+	}
+	if result.GetError() != "" {
+		writeProblem(writer, http.StatusBadGateway, "runtime_session_stop_failed", result.GetError())
+		return
+	}
+	boxes, err := s.store.StopRuntimeSession(request.Context(), user, boxID)
+	if err != nil {
+		s.writeStoreError(writer, "persist stopped runtime session", err)
+		return
+	}
+	for _, attachedBox := range boxes {
+		s.terminateAgentTerminal(attachedBox)
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}

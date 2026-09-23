@@ -74,14 +74,14 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
 		input.RuntimeSessionMode = "new"
 	}
 	input.RuntimeSessionRef = strings.TrimSpace(input.RuntimeSessionRef)
-	if input.RuntimeSessionMode != "new" && input.RuntimeSessionMode != "resume" {
-		return domain.Box{}, fmt.Errorf("%w: runtime session mode must be new or resume", storepkg.ErrInvalidState)
+	if input.RuntimeSessionMode != "new" && input.RuntimeSessionMode != "resume" && input.RuntimeSessionMode != "attach" {
+		return domain.Box{}, fmt.Errorf("%w: runtime session mode must be new, resume, or attach", storepkg.ErrInvalidState)
 	}
 	if input.RuntimeSessionMode == "new" && input.RuntimeSessionRef != "" {
 		return domain.Box{}, fmt.Errorf("%w: new runtime session must not include a session reference", storepkg.ErrInvalidState)
 	}
-	if input.RuntimeSessionMode == "resume" && input.RuntimeSessionRef == "" {
-		return domain.Box{}, fmt.Errorf("%w: resume runtime session requires a session reference", storepkg.ErrInvalidState)
+	if (input.RuntimeSessionMode == "resume" || input.RuntimeSessionMode == "attach") && input.RuntimeSessionRef == "" {
+		return domain.Box{}, fmt.Errorf("%w: resume or attach requires a runtime session reference", storepkg.ErrInvalidState)
 	}
 	if len(input.RuntimeSessionRef) > 256 {
 		return domain.Box{}, fmt.Errorf("%w: runtime session reference must not exceed 256 characters", storepkg.ErrInvalidState)
@@ -109,12 +109,14 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
 		if err != nil {
 			return mapError("get box agent version", err)
 		}
-		if input.RuntimeSessionMode == "resume" {
+		if input.RuntimeSessionMode == "resume" || input.RuntimeSessionMode == "attach" {
 			if runtimeType != "claude" {
-				return fmt.Errorf("%w: manual session resume is currently supported only for Claude", storepkg.ErrInvalidState)
+				return fmt.Errorf("%w: runtime session resume and attach are currently supported only for Claude", storepkg.ErrInvalidState)
 			}
-			if _, parseErr := uuid.Parse(input.RuntimeSessionRef); parseErr != nil {
-				return fmt.Errorf("%w: claude session reference must be a UUID", storepkg.ErrInvalidState)
+			if input.RuntimeSessionMode == "resume" {
+				if _, parseErr := uuid.Parse(input.RuntimeSessionRef); parseErr != nil {
+					return fmt.Errorf("%w: claude session reference must be a UUID", storepkg.ErrInvalidState)
+				}
 			}
 		}
 
@@ -171,6 +173,21 @@ func (s *Store) CreateBox(ctx context.Context, user domain.User, input domain.Cr
 		)
 		if err != nil {
 			return mapError("insert box", err)
+		}
+		if input.RuntimeSessionMode != "new" {
+			attachmentID, idErr := newUUIDv7()
+			if idErr != nil {
+				return idErr
+			}
+			if _, err := tx.Exec(ctx, `
+                INSERT INTO runtime_session_attachments(
+                    id, organization_id, host_id, box_id, runtime_type, session_ref,
+                    attach_mode, input_policy, status, created_by_user_id
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,'shared','active',$8)`,
+				attachmentID, user.OrganizationID, input.HostID, boxID, runtimeType,
+				input.RuntimeSessionRef, input.RuntimeSessionMode, user.ID); err != nil {
+				return mapError("insert runtime session attachment", err)
+			}
 		}
 		if err := insertAudit(ctx, tx, user.OrganizationID, "user", user.ID, "",
 			"box.created", "box", boxID,
@@ -387,6 +404,11 @@ func (s *Store) DeleteBox(ctx context.Context, user domain.User, boxID string) (
                 updated_at = now(), last_activity_at = now(), version = version + 1
             WHERE id = $1`, boxID); err != nil {
 			return mapError("terminate deleted box", err)
+		}
+		if _, err := tx.Exec(ctx, `
+            UPDATE runtime_session_attachments SET status = 'detached', detached_at = COALESCE(detached_at, now())
+            WHERE box_id = $1 AND status = 'active'`, boxID); err != nil {
+			return mapError("detach deleted box session", err)
 		}
 		return insertAudit(ctx, tx, organizationID, "user", user.ID, "",
 			"box.deleted", "box", boxID, map[string]any{"runtimeInstanceId": runtimeID})

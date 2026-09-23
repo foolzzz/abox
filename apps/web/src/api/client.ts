@@ -21,6 +21,7 @@ import type {
   ReplaceAccessControlRequest,
   ResetPasswordRequest,
   RuntimeSession,
+  RuntimeSessionAttachment,
   Schedule,
   ScheduleExecution,
   SubagentInstance,
@@ -164,6 +165,12 @@ export const api = {
     request<BoxSnapshot>(`/boxes/${encode(boxId)}/model`, { method: "PATCH", body: { model }, signal }),
   updateBoxVisibility: (boxId: string, visibility: "private" | "org", signal?: AbortSignal) =>
     request<BoxSnapshot>(`/boxes/${encode(boxId)}/visibility`, { method: "PATCH", body: { visibility }, signal }),
+  listRuntimeSessionAttachments: (boxId: string, signal?: AbortSignal) =>
+    request<RuntimeSessionAttachment[]>(`/boxes/${encode(boxId)}/runtime-session/attachments`, { signal }),
+  detachRuntimeSession: (boxId: string, signal?: AbortSignal) =>
+    request<void>(`/boxes/${encode(boxId)}/runtime-session/detach`, { method: "POST", signal }),
+  stopRuntimeSession: (boxId: string, signal?: AbortSignal) =>
+    request<void>(`/boxes/${encode(boxId)}/runtime-session/stop`, { method: "POST", signal }),
   getBoxAcl: (boxId: string, signal?: AbortSignal) =>
     request<AccessControlEntry[]>(`/boxes/${encode(boxId)}/acl`, { signal }),
   replaceBoxAcl: (boxId: string, body: ReplaceAccessControlRequest, signal?: AbortSignal) =>
