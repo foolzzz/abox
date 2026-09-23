@@ -325,3 +325,43 @@ test("Terminal widescreen fills the browser page and exits without Fullscreen AP
   await expect(page.getByRole("button", { name: "Widescreen", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Agent Terminal", exact: true })).toBeVisible();
 });
+
+test("Terminal adapts across phone, tablet, and resized visual viewports", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installAdminApi(page);
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.removeItem("agentbox.terminal.fontSize"));
+  await page.goto("/boxes/box-owned/agent-terminal");
+
+  const shortcuts = page.getByLabel("Terminal shortcut keys");
+  await expect(shortcuts).toBeVisible();
+  await expect(page.getByText("13px", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Increase terminal font size", exact: true }).click();
+  await expect(page.getByText("14px", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.localStorage.getItem("agentbox.terminal.fontSize"))).toBe("14");
+
+  const phoneSurface = await page.locator(".terminal-surface").boundingBox();
+  expect(phoneSurface).not.toBeNull();
+  expect(phoneSurface!.width).toBeLessThanOrEqual(390);
+  expect(phoneSurface!.height).toBeGreaterThanOrEqual(260);
+
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await expect(shortcuts).toBeHidden();
+  const tabletSurface = await page.locator(".terminal-surface").boundingBox();
+  expect(tabletSurface).not.toBeNull();
+  expect(tabletSurface!.width).toBeLessThanOrEqual(768);
+
+  await page.getByRole("button", { name: "Widescreen", exact: true }).click();
+  await page.setViewportSize({ width: 640, height: 500 });
+  await expect(shortcuts).toBeVisible();
+  await expect.poll(async () => page.locator(".terminal-page").evaluate((element) => {
+    const rectangle = element.getBoundingClientRect();
+    return { width: Math.round(rectangle.width), height: Math.round(rectangle.height) };
+  })).toEqual({ width: 640, height: 500 });
+  const mobileKeys = await shortcuts.boundingBox();
+  expect(mobileKeys).not.toBeNull();
+  expect(mobileKeys!.y + mobileKeys!.height).toBeLessThanOrEqual(500);
+
+  await page.reload();
+  await expect(page.getByText("14px", { exact: true })).toBeVisible();
+});
