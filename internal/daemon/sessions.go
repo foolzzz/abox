@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"io/fs"
 	"os"
@@ -28,9 +29,9 @@ type runtimeSessionDiscovery struct {
 func (d runtimeSessionDiscovery) HandleRuntimeSessionQuery(ctx context.Context, query *hostv1.RuntimeSessionQuery) *hostv1.RuntimeSessionList {
 	result := &hostv1.RuntimeSessionList{RequestId: query.GetRequestId()}
 	if strings.TrimSpace(query.GetAction()) == "stop" {
-		reference := strings.TrimSpace(query.GetSessionRef())
-		if reference == "" {
-			result.Error = "session reference is required"
+		reference, err := resolveClaudeBackgroundJobReference(ctx, d.claudeBinary, query.GetSessionRef())
+		if err != nil {
+			result.Error = err.Error()
 			return result
 		}
 		binary := strings.TrimSpace(d.claudeBinary)
@@ -58,6 +59,49 @@ func (d runtimeSessionDiscovery) HandleRuntimeSessionQuery(ctx context.Context, 
 	return result
 }
 
+type claudeAgentRecord struct {
+	ID        string `json:"id"`
+	SessionID string `json:"sessionId"`
+	Kind      string `json:"kind"`
+}
+
+func resolveClaudeBackgroundJobReference(ctx context.Context, claudeBinary, reference string) (string, error) {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return "", errors.New("session reference is required")
+	}
+	binary := strings.TrimSpace(claudeBinary)
+	if binary == "" {
+		binary = "claude"
+	}
+	output, err := exec.CommandContext(ctx, binary, "agents", "--json").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("list Claude background sessions: %w: %s", err, boundedTerminalOutput(output))
+	}
+	var agents []claudeAgentRecord
+	if err := json.Unmarshal(output, &agents); err != nil {
+		return "", fmt.Errorf("decode Claude background sessions: %w", err)
+	}
+	for _, agent := range agents {
+		if !isClaudeBackgroundKind(agent.Kind) || strings.TrimSpace(agent.ID) == "" {
+			continue
+		}
+		if reference == strings.TrimSpace(agent.ID) || reference == strings.TrimSpace(agent.SessionID) {
+			return strings.TrimSpace(agent.ID), nil
+		}
+	}
+	return "", fmt.Errorf("Claude session %q is not an attachable background session", reference)
+}
+
+func isClaudeBackgroundKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "background", "bg":
+		return true
+	default:
+		return false
+	}
+}
+
 func discoverClaudeSessions(ctx context.Context) ([]*hostv1.RuntimeSession, error) {
 	configDirectory := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR"))
 	if configDirectory == "" {
@@ -70,6 +114,7 @@ func discoverClaudeSessions(ctx context.Context) ([]*hostv1.RuntimeSession, erro
 	live := readLiveClaudeSessions(filepath.Join(configDirectory, "sessions"))
 	projectsDirectory := filepath.Join(configDirectory, "projects")
 	result := make([]*hostv1.RuntimeSession, 0)
+	seen := make(map[string]struct{})
 	err := filepath.WalkDir(projectsDirectory, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if errors.Is(walkErr, os.ErrNotExist) {
@@ -119,11 +164,25 @@ func discoverClaudeSessions(ctx context.Context) ([]*hostv1.RuntimeSession, erro
 		if session.Name == "" {
 			session.Name = reference[:8]
 		}
+		seen[reference] = struct{}{}
 		result = append(result, session)
 		return nil
 	})
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	}
+	for reference, metadata := range live {
+		if _, ok := seen[reference]; ok || !metadata.Running {
+			continue
+		}
+		name := metadata.Name
+		if name == "" {
+			name = reference[:8]
+		}
+		result = append(result, &hostv1.RuntimeSession{
+			SessionRef: reference, RuntimeType: "claude", Workspace: metadata.CWD,
+			Name: name, Status: metadata.Status, Running: true, UpdatedUnixMillis: metadata.UpdatedAt,
+		})
 	}
 	sort.Slice(result, func(left, right int) bool {
 		return result[left].UpdatedUnixMillis > result[right].UpdatedUnixMillis
@@ -167,6 +226,8 @@ type liveClaudeSession struct {
 	Status    string
 	UpdatedAt int64
 	Running   bool
+	Kind      string
+	JobID     string
 }
 
 func readLiveClaudeSessions(directory string) map[string]liveClaudeSession {
@@ -190,19 +251,24 @@ func readLiveClaudeSessions(directory string) map[string]liveClaudeSession {
 			Name      string `json:"name"`
 			Status    string `json:"status"`
 			UpdatedAt int64  `json:"updatedAt"`
+			Kind      string `json:"kind"`
+			JobID     string `json:"jobId"`
 		}
 		if json.Unmarshal(content, &metadata) != nil || metadata.SessionID == "" {
 			continue
 		}
-		running := metadata.PID > 0 && syscall.Kill(metadata.PID, 0) == nil
+		processRunning := metadata.PID > 0 && syscall.Kill(metadata.PID, 0) == nil
+		attachable := processRunning && isClaudeBackgroundKind(metadata.Kind) && strings.TrimSpace(metadata.JobID) != ""
 		status := metadata.Status
-		if status == "" {
+		if processRunning && !attachable {
+			status = "interactive"
+		} else if status == "" {
 			status = "running"
 		}
-		if !running {
+		if !processRunning {
 			status = "stopped"
 		}
-		result[metadata.SessionID] = liveClaudeSession{CWD: metadata.CWD, Name: metadata.Name, Status: status, UpdatedAt: metadata.UpdatedAt, Running: running}
+		result[metadata.SessionID] = liveClaudeSession{CWD: metadata.CWD, Name: metadata.Name, Status: status, UpdatedAt: metadata.UpdatedAt, Running: attachable, Kind: metadata.Kind, JobID: metadata.JobID}
 	}
 	return result
 }

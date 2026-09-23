@@ -284,7 +284,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] Admin 新建 Box 时填写 Host 本地路径；若该 Host 尚未注册此路径，Web 自动创建并等待 Workspace 验证成功，再使用新 Workspace 创建 Box；已注册路径直接复用。
 - [x] Claude Box 可选择新会话或手动填写 Claude Session UUID 恢复历史对话；允许多个 Box 使用相同 Session Ref，Box 删除不删除 Claude 历史。
 - [x] Admin 选择 Claude Resume 时可从所选 Host 搜索本地 Session；选择结果自动填充 Session UUID 和 Workspace 路径，发现失败时保留手动输入。
-- [x] 运行中的 Claude Session 支持多个 Box 重复 Attach；Attachment 持久化记录 Box、Host、Session Ref、模式和共享输入策略。
+- [x] 运行中的 Claude Background Session 支持多个 Box 重复 Attach；Web 提交规范 Session UUID，daemon 通过 `claude agents --json` 解析实际 Background Job ID 后执行 `claude attach`，Attachment 持久化记录 Box、Host、Session UUID、模式和共享输入策略；普通 Interactive Session 不作为可 Attach 目标。
 - [x] Detach 只关闭当前 Box 的 tmux/Attachment，不停止共享 Claude；Admin“为所有人停止”通过 `claude stop` 停止 Session 并将全部关联 Box 转为 Resume。
 - [x] Box 列表默认按当前用户过滤，并支持切换到其他 Organization 用户或全部 Owner。
 - [x] Host 可注册任意数量 Box；`maxActiveBoxes` 仅作为同时运行 Runtime 的并发上限。
@@ -301,7 +301,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] **一步创建 Agent Box**：创建页在同一表单中同时提供名称、Agent、目标 Host、项目目录/Workspace，并且仅有一次提交动作；不存在分步器，成功提交后创建完整绑定的 Box。
 - [x] **PWA 更新激活**：新 Web 构建发布后，已打开或再次访问的 PWA 客户端自动激活等待中的 Service Worker，并自动重新加载到最新构建，无需用户手动清缓存或关闭全部标签页。
 - [x] **Runtime 可用性恢复**：Server Frame Idempotency Store 采用有界滚动保留，不因长期心跳耗尽容量；Control Plane 重启后 daemon 通过 gRPC keepalive 和主动重连恢复连接；Agent 创建弹窗打开期间自动刷新 Host Runtime 状态，在线 Host 的 OMP、Codex、Claude 在 E2E 等待预算内重新显示为可用。
-- [x] **浏览器 E2E 回归覆盖**：真实 Chrome 覆盖 Box Owner 筛选、Claude Resume/Discovery/Shared Attach、Box Detach、Admin 全局 Stop、Host 级联删除、Agent 默认模型、Workspace 自动注册、Terminal 宽屏及 390px 手机/640px 动态视口/768px 平板适配、Runtime/PWA 和远程 HTTP `randomUUID` 兼容回退；隔离 Fixture Suite 共 22 项通过，本机部署 Suite 共 6 项通过。
+- [x] **浏览器 E2E 回归覆盖**：真实 Chrome 覆盖 Box Owner 筛选、Claude Resume/Discovery/Shared Attach、Attach Session UUID 提交、Box Detach、Admin 全局 Stop、Host 级联删除、Agent 默认模型、Workspace 自动注册、Terminal 无垂直边缝、Terminal 宽屏及 390px 手机/640px 动态视口/768px 平板适配、Runtime/PWA 和远程 HTTP `randomUUID` 兼容回退；隔离 Fixture Suite 共 24 项通过，本机部署 Suite 共 6 项通过。
 - [x] Web Console 在远程 HTTP/Insecure Context 中不依赖 `crypto.randomUUID()`；缺失时使用兼容 UUID 生成器，通知和其他 UI 操作保持可用。
 
 

@@ -208,6 +208,30 @@ test("duplicate Claude session references can be resumed by multiple Boxes", asy
   ]);
 });
 
+test("running Claude session selection submits attach mode and reference", async ({ page }) => {
+  const api = await installAdminApi(page);
+  const sessionRef = "22222222-2222-4222-8222-222222222222";
+  await page.goto("/boxes?create=1");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("combobox").first().selectOption("agent-claude");
+  await dialog.getByRole("radio", { name: "Attach running session", exact: true }).check();
+  await dialog.getByRole("button", { name: "Choose session Other Session", exact: true }).click();
+  await expect(dialog.getByLabel("Claude session ID", { exact: true })).toHaveValue(sessionRef);
+  await expect(dialog.getByRole("radio", { name: "Attach running session", exact: true })).toBeChecked();
+  await dialog.getByLabel("Box name").fill("Attach Claude");
+  await dialog.getByRole("button", { name: "Create box", exact: true }).click();
+  await expect(page).toHaveURL(/\/boxes\/box-created\/agent-terminal$/);
+  expect(api.boxCreates.at(-1)).toEqual({
+    name: "Attach Claude",
+    agentId: "agent-claude",
+    hostId: "host-online",
+    workspaceId: "workspace-created",
+    runtimeSessionMode: "attach",
+    runtimeSessionRef: sessionRef
+  });
+  expect(api.workspaceCreates.at(-1)).toEqual({ hostId: "host-online", name: "other", path: "/srv/other" });
+});
+
 test("shared Claude session supports Box detach without global stop", async ({ page }) => {
   const api = await installAdminApi(page);
   await page.goto("/boxes/box-shared-a/agent-terminal");
@@ -364,4 +388,14 @@ test("Terminal adapts across phone, tablet, and resized visual viewports", async
 
   await page.reload();
   await expect(page.getByText("14px", { exact: true })).toBeVisible();
+});
+
+test("Terminal content has no vertical frame seam", async ({ page }) => {
+  await installAdminApi(page);
+  await page.goto("/boxes/box-owned/agent-terminal");
+
+  await expect.poll(async () => page.locator(".terminal-surface").evaluate((surface) => {
+    const style = getComputedStyle(surface);
+    return { left: style.borderLeftWidth, right: style.borderRightWidth };
+  })).toEqual({ left: "0px", right: "0px" });
 });

@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-23
+
+### Fixed
+
+- 移除 Agent Terminal Surface 的垂直边框，修复深色终端左侧持续可见的细线。
+- 新建 Box 选择 Attach 运行中 Claude Session 时正确提交 Session UUID；daemon 通过 `claude agents --json` 将 UUID 解析为 Background Job ID 后执行 `claude attach`/`claude stop`，并排除不可 Attach 的普通交互会话。
+
 ## [0.8.0] - 2026-09-23
 
 ### Added
@@ -183,7 +190,8 @@
 - Host Credential、幂等 Command、Event Journal/Ack 和 PostgreSQL 约束用于保护控制面与 daemon 通信。
 - Runtime Secret 仅引用 Host 环境，不在 Control Plane 保存明文。
 
-[Unreleased]: https://github.com/foolzzz/abox/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/foolzzz/abox/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/foolzzz/abox/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/foolzzz/abox/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/foolzzz/abox/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/foolzzz/abox/compare/v0.6.0...v0.7.0

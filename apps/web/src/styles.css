@@ -648,7 +648,7 @@ body.terminal-widescreen-active { overflow: hidden; }
 .terminal-session-id span { color: var(--text-faint); font-size: .58rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .terminal-session-id code { overflow: hidden; color: var(--teal-strong); font-family: "JetBrains Mono", monospace; font-size: .63rem; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-session-id b { position: absolute; right: 7px; bottom: -20px; z-index: 3; padding: 3px 6px; color: #07110f; background: var(--teal); border-radius: 5px; font-size: .55rem; }
-.terminal-surface { display: flex; height: 620px; min-height: 320px; overflow: hidden; flex-direction: column; border: 1px solid var(--border); border-radius: 18px; background: #090d14; box-shadow: var(--shadow); }
+.terminal-surface { display: flex; height: 620px; min-height: 320px; overflow: hidden; flex-direction: column; border: 0; border-radius: 18px; background: #090d14; box-shadow: var(--shadow); }
 .terminal-surface:fullscreen { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
 .terminal-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 8px; min-height: 44px; overflow-x: auto; padding: 7px 10px; background: #0d131d; border-bottom: 1px solid var(--border-soft); }
 .terminal-toolbar label { display: flex; min-width: min(100%, 300px); align-items: center; gap: 7px; color: var(--text-faint); }

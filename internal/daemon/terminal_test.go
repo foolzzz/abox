@@ -51,11 +51,11 @@ func TestAgentRuntimeCommandRejectsResumeForOtherRuntimes(t *testing.T) {
 }
 
 func TestAgentRuntimeCommandAttachesClaudeBackgroundSession(t *testing.T) {
-	command, err := agentRuntimeCommand("claude", "", "attach", "3f8f5ddb-c916-421b-8e21-4423a0a96af6")
+	command, err := agentRuntimeCommand("claude", "", "attach", "job-1234")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"claude", "attach", "3f8f5ddb-c916-421b-8e21-4423a0a96af6"}
+	want := []string{"claude", "attach", "job-1234"}
 	if strings.Join(command, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("command = %#v, want %#v", command, want)
 	}
