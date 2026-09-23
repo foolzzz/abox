@@ -155,6 +155,8 @@ message TerminalInput {
   string runtime_type = 10;
   string model = 11;
   bool terminate = 12;
+  string runtime_session_mode = 13;
+  string runtime_session_ref = 14;
 }
 
 message Welcome {

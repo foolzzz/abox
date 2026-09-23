@@ -174,13 +174,13 @@ func (m *TerminalManager) terminalCommand(ctx context.Context, input *hostv1.Ter
 		return nil, "", errors.New("agent terminal requires boxId and runtimeType")
 	}
 	tmuxSession := tmuxSessionName(input.GetBoxId())
-	if err := m.ensureAgentSession(ctx, tmuxSession, workspace, input.GetRuntimeType(), input.GetModel()); err != nil {
+	if err := m.ensureAgentSession(ctx, tmuxSession, workspace, input.GetRuntimeType(), input.GetModel(), input.GetRuntimeSessionMode(), input.GetRuntimeSessionRef()); err != nil {
 		return nil, "", err
 	}
 	return exec.CommandContext(ctx, m.tmuxBinary, "attach-session", "-t", "="+tmuxSession), tmuxSession, nil
 }
 
-func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, workspace, runtimeType, model string) error {
+func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, workspace, runtimeType, model, sessionMode, sessionRef string) error {
 	if runtimeType == "claude" {
 		if err := m.ensureTmuxUpdateEnvironment(ctx, "ANTHROPIC_API_KEY"); err != nil {
 			return err
@@ -189,19 +189,9 @@ func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, w
 	if m.tmuxSessionExists(ctx, sessionName) {
 		return nil
 	}
-	var runtimeCommand []string
-	switch runtimeType {
-	case "omp":
-		runtimeCommand = []string{"omp", "--approval-mode", "yolo"}
-	case "codex":
-		runtimeCommand = []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}
-	case "claude":
-		runtimeCommand = []string{"claude", "--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions"}
-	default:
-		return fmt.Errorf("runtime %q does not support native Agent Terminal", runtimeType)
-	}
-	if model = strings.TrimSpace(model); model != "" {
-		runtimeCommand = append(runtimeCommand, "--model", model)
+	runtimeCommand, err := agentRuntimeCommand(runtimeType, model, sessionMode, sessionRef)
+	if err != nil {
+		return err
 	}
 	args := []string{"new-session", "-d", "-s", sessionName, "-c", workspace, "--"}
 	args = append(args, runtimeCommand...)
@@ -215,6 +205,32 @@ func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, w
 	_ = exec.CommandContext(ctx, m.tmuxBinary, "set-option", "-t", "="+sessionName, "history-limit", "50000").Run()
 	_ = exec.CommandContext(ctx, m.tmuxBinary, "set-option", "-t", "="+sessionName, "mouse", "on").Run()
 	return nil
+}
+
+func agentRuntimeCommand(runtimeType, model, sessionMode, sessionRef string) ([]string, error) {
+	var command []string
+	switch runtimeType {
+	case "omp":
+		command = []string{"omp", "--approval-mode", "yolo"}
+	case "codex":
+		command = []string{"codex", "--dangerously-bypass-approvals-and-sandbox"}
+	case "claude":
+		command = []string{"claude", "--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions"}
+	default:
+		return nil, fmt.Errorf("runtime %q does not support native Agent Terminal", runtimeType)
+	}
+	sessionMode = strings.ToLower(strings.TrimSpace(sessionMode))
+	sessionRef = strings.TrimSpace(sessionRef)
+	if sessionMode == "resume" {
+		if runtimeType != "claude" || sessionRef == "" {
+			return nil, errors.New("claude resume requires a session reference")
+		}
+		command = append(command, "--resume", sessionRef)
+	}
+	if model = strings.TrimSpace(model); model != "" {
+		command = append(command, "--model", model)
+	}
+	return command, nil
 }
 
 func (m *TerminalManager) ensureTmuxUpdateEnvironment(ctx context.Context, names ...string) error {

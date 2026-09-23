@@ -90,15 +90,16 @@ func prepareRuntimeStartCommandTx(ctx context.Context, tx pgx.Tx, command domain
 	if command.BoxID == "" || command.HostID == "" {
 		return domain.HostCommand{}, fmt.Errorf("%w: runtime.start requires box and host ids", storepkg.ErrInvalidState)
 	}
-	var organizationID, hostID, runtimeType, daemonInstanceID string
+	var organizationID, hostID, runtimeType, daemonInstanceID, sessionMode, sessionRef string
 	err := tx.QueryRow(ctx, `
         SELECT b.organization_id, b.host_id, b.runtime_type,
-               COALESCE(h.current_daemon_instance_id::text, '')
+               COALESCE(h.current_daemon_instance_id::text, ''),
+               b.runtime_session_mode, COALESCE(b.runtime_session_ref, '')
         FROM boxes b
         JOIN hosts h ON h.id = b.host_id AND h.organization_id = b.organization_id
         WHERE b.id = $1
         FOR UPDATE OF b`, command.BoxID).Scan(
-		&organizationID, &hostID, &runtimeType, &daemonInstanceID)
+		&organizationID, &hostID, &runtimeType, &daemonInstanceID, &sessionMode, &sessionRef)
 	if err != nil {
 		return domain.HostCommand{}, mapError("load runtime start box", err)
 	}
@@ -118,18 +119,29 @@ func prepareRuntimeStartCommandTx(ctx context.Context, tx pgx.Tx, command domain
 			return domain.HostCommand{}, err
 		}
 	}
-	snapshot, err := jsonValue(command.Payload, "{}")
-	if err != nil {
-		return domain.HostCommand{}, err
+	var startPayload map[string]any
+	if err := json.Unmarshal(command.Payload, &startPayload); err != nil {
+		return domain.HostCommand{}, fmt.Errorf("%w: runtime.start payload must be valid JSON", storepkg.ErrInvalidState)
 	}
+	if startPayload == nil {
+		startPayload = make(map[string]any)
+	}
+	if sessionMode == "resume" && sessionRef != "" {
+		startPayload["sessionRef"] = sessionRef
+	}
+	snapshot, err := json.Marshal(startPayload)
+	if err != nil {
+		return domain.HostCommand{}, fmt.Errorf("encode runtime.start payload: %w", err)
+	}
+	command.Payload = snapshot
 	tag, err := tx.Exec(ctx, `
         INSERT INTO runtime_instances(
             id, organization_id, box_id, host_id, runtime_type,
-            daemon_instance_id, status, config_snapshot
-        ) VALUES ($1,$2,$3,$4,$5,$6,'starting',$7)
+            daemon_instance_id, status, config_snapshot, session_ref
+        ) VALUES ($1,$2,$3,$4,$5,$6,'starting',$7,$8)
         ON CONFLICT (id) DO NOTHING`,
 		command.RuntimeInstanceID, organizationID, command.BoxID, hostID,
-		runtimeType, daemonInstanceID, snapshot)
+		runtimeType, daemonInstanceID, snapshot, nullableText(sessionRef))
 	if err != nil {
 		return domain.HostCommand{}, mapError("insert commanded runtime instance", err)
 	}

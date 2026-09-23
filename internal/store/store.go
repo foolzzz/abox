@@ -29,7 +29,7 @@ type Store interface {
 	GetAgent(ctx context.Context, user domain.User, id string) (domain.Agent, error)
 
 	ListHosts(ctx context.Context, user domain.User) ([]domain.Host, error)
-	DeleteHost(ctx context.Context, user domain.User, hostID string) error
+	DeleteHost(ctx context.Context, user domain.User, hostID string, cascade bool) error
 	UpsertHost(ctx context.Context, host domain.Host, daemonInstanceID string, lastAck uint64) (domain.Host, error)
 	TouchHost(ctx context.Context, hostID, daemonInstanceID string, lastAck uint64) error
 	GetHost(ctx context.Context, user domain.User, id string) (domain.Host, error)

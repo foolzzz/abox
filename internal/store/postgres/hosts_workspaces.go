@@ -57,7 +57,7 @@ func (s *Store) ListHosts(ctx context.Context, user domain.User) ([]domain.Host,
 	return result, nil
 }
 
-func (s *Store) DeleteHost(ctx context.Context, user domain.User, hostID string) error {
+func (s *Store) DeleteHost(ctx context.Context, user domain.User, hostID string, cascade bool) error {
 	return s.withTx(ctx, func(tx pgx.Tx) error {
 		if _, err := requireRole(ctx, tx, user, "admin"); err != nil {
 			return err
@@ -76,16 +76,77 @@ func (s *Store) DeleteHost(ctx context.Context, user domain.User, hostID string)
 		if status != domain.HostOffline {
 			return fmt.Errorf("%w: host must be offline before deletion", storepkg.ErrConflict)
 		}
-		var hasActiveBoxes, hasWorkspaces bool
+		var boxCount, workspaceCount, scheduleCount int
 		if err := tx.QueryRow(ctx, `
             SELECT
-                EXISTS(SELECT 1 FROM boxes WHERE organization_id = $1 AND host_id = $2 AND status <> 'terminated'),
-                EXISTS(SELECT 1 FROM workspaces WHERE organization_id = $1 AND host_id = $2 AND status <> 'archived')`,
-			user.OrganizationID, hostID).Scan(&hasActiveBoxes, &hasWorkspaces); err != nil {
+                (SELECT count(*) FROM boxes WHERE organization_id = $1 AND host_id = $2 AND status <> 'terminated'),
+                (SELECT count(*) FROM workspaces WHERE organization_id = $1 AND host_id = $2 AND status <> 'archived'),
+                (SELECT count(*) FROM schedules WHERE organization_id = $1 AND host_id = $2 AND status <> 'deleted')`,
+			user.OrganizationID, hostID).Scan(&boxCount, &workspaceCount, &scheduleCount); err != nil {
 			return mapError("check host dependencies", err)
 		}
-		if hasActiveBoxes || hasWorkspaces {
-			return fmt.Errorf("%w: host is referenced by active boxes or non-archived workspaces", storepkg.ErrConflict)
+		if !cascade && (boxCount > 0 || workspaceCount > 0 || scheduleCount > 0) {
+			return fmt.Errorf("%w: host has %d active boxes, %d workspaces, and %d schedules; retry with cascade", storepkg.ErrConflict, boxCount, workspaceCount, scheduleCount)
+		}
+		if cascade {
+			if _, err := tx.Exec(ctx, `
+                UPDATE schedules SET status = 'deleted', next_run_at = NULL,
+                    updated_at = now(), version = version + 1
+                WHERE organization_id = $1 AND host_id = $2 AND status <> 'deleted'`, organizationID, hostID); err != nil {
+				return mapError("delete host schedules", err)
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE schedule_executions SET status = 'failed', reason = 'host_deleted', updated_at = now()
+                WHERE organization_id = $1
+                  AND schedule_id IN (SELECT id FROM schedules WHERE organization_id = $1 AND host_id = $2)
+                  AND status = 'claimed'`, organizationID, hostID); err != nil {
+				return mapError("fail host schedule executions", err)
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE runs SET status = 'cancelled', finished_at = now(), terminal_reason = 'host_deleted', version = version + 1
+                WHERE organization_id = $1 AND box_id IN (SELECT id FROM boxes WHERE organization_id = $1 AND host_id = $2)
+                  AND status IN ('queued','dispatching','running','waiting_approval','interrupting','disconnected')`, organizationID, hostID); err != nil {
+				return mapError("cancel host runs", err)
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE messages SET status = 'cancelled'
+                WHERE organization_id = $1 AND box_id IN (SELECT id FROM boxes WHERE organization_id = $1 AND host_id = $2)
+                  AND status IN ('queued','dispatched')`, organizationID, hostID); err != nil {
+				return mapError("cancel host messages", err)
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE approvals SET status = 'cancelled', resolved_at = now(),
+                    decision_payload = jsonb_build_object('decision','denied','reason','host_deleted'), version = version + 1
+                WHERE organization_id = $1 AND box_id IN (SELECT id FROM boxes WHERE organization_id = $1 AND host_id = $2)
+                  AND status = 'pending'`, organizationID, hostID); err != nil {
+				return mapError("cancel host approvals", err)
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE host_commands SET status = 'cancelled', completed_at = now(), updated_at = now(),
+                    error_code = 'host_deleted', error_message = 'host deleted with dependencies'
+                WHERE organization_id = $1 AND host_id = $2
+                  AND status IN ('pending','leased','accepted','running')`, organizationID, hostID); err != nil {
+				return mapError("cancel host commands", err)
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE runtime_instances SET status = 'exited', stopped_at = now(),
+                    terminal_reason = 'host_deleted', version = version + 1
+                WHERE organization_id = $1 AND host_id = $2
+                  AND status IN ('starting','ready','busy','stopping')`, organizationID, hostID); err != nil {
+				return mapError("exit host runtimes", err)
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE boxes SET status = 'terminated', terminated_at = COALESCE(terminated_at, now()),
+                    updated_at = now(), last_activity_at = now(), version = version + 1
+                WHERE organization_id = $1 AND host_id = $2 AND status <> 'terminated'`, organizationID, hostID); err != nil {
+				return mapError("terminate host boxes", err)
+			}
+			if _, err := tx.Exec(ctx, `
+                UPDATE workspaces SET status = 'archived', archived_at = COALESCE(archived_at, now()),
+                    updated_at = now(), version = version + 1
+                WHERE organization_id = $1 AND host_id = $2 AND status <> 'archived'`, organizationID, hostID); err != nil {
+				return mapError("archive host workspaces", err)
+			}
 		}
 		if _, err := tx.Exec(ctx, `
             UPDATE hosts
@@ -101,7 +162,7 @@ func (s *Store) DeleteHost(ctx context.Context, user domain.User, hostID string)
 			return mapError("disable host runtimes", err)
 		}
 		return insertAudit(ctx, tx, organizationID, "user", user.ID, "",
-			"host.deleted", "host", hostID, map[string]any{"name": name})
+			"host.deleted", "host", hostID, map[string]any{"name": name, "cascade": cascade, "boxCount": boxCount, "workspaceCount": workspaceCount, "scheduleCount": scheduleCount})
 	})
 }
 

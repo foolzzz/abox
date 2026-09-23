@@ -28,6 +28,16 @@ export const agents: Agent[] = [
     systemPrompt: "Work carefully.",
     createdAt: NOW,
     updatedAt: NOW
+  },
+  {
+    id: "agent-claude",
+    name: "Claude Agent",
+    runtimeType: "claude",
+    version: 1,
+    model: "claude-sonnet-4-6",
+    systemPrompt: "",
+    createdAt: NOW,
+    updatedAt: NOW
   }
 ];
 
@@ -80,6 +90,7 @@ export const boxes: Box[] = [
     status: "running",
     ownerUserId: "user-admin",
     runtimeType: "omp",
+    runtimeSessionMode: "new",
     version: 1,
     createdAt: NOW,
     updatedAt: NOW
@@ -94,6 +105,22 @@ export const boxes: Box[] = [
     status: "idle",
     ownerUserId: "user-admin",
     runtimeType: "omp",
+    runtimeSessionMode: "new",
+    version: 1,
+    createdAt: NOW,
+    updatedAt: NOW
+  },
+  {
+    id: "box-developer",
+    name: "Developer Box",
+    agentId: "agent-primary",
+    hostId: "host-online",
+    workspaceId: "workspace-project",
+    visibility: "private",
+    status: "idle",
+    ownerUserId: "user-developer",
+    runtimeType: "omp",
+    runtimeSessionMode: "new",
     version: 1,
     createdAt: NOW,
     updatedAt: NOW
@@ -156,9 +183,11 @@ interface ApiFixtureOptions {
 }
 
 export interface ApiObservations {
+  agentCreates: Array<Record<string, unknown>>;
   boxCreates: Array<Record<string, unknown>>;
   workspaceCreates: Array<Record<string, unknown>>;
   deletes: string[];
+  hostCascadeDeletes: string[];
 }
 
 export function installUserApi(page: Page): Promise<ApiObservations> {
@@ -177,9 +206,11 @@ export function installUserApi(page: Page): Promise<ApiObservations> {
 }
 export async function installAdminApi(page: Page, options: ApiFixtureOptions = {}): Promise<ApiObservations> {
   const observations: ApiObservations = {
+    agentCreates: [],
     boxCreates: [],
     workspaceCreates: [],
-    deletes: []
+    deletes: [],
+    hostCascadeDeletes: []
   };
   const meta = options.meta ?? adminMeta;
   let createdBox: Box | undefined;
@@ -188,8 +219,9 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const method = request.method();
-    const path = new URL(request.url()).pathname.replace(/^\/api\/v1/, "");
-
+    const requestURL = new URL(request.url());
+    const path = requestURL.pathname.replace(/^\/api\/v1/, "");
+    if (method === "GET" && path === "/boxes") return json(route, meta.currentUser.role === "admin" ? boxes : boxes.filter((box) => box.ownerUserId === meta.currentUser.id || box.visibility === "org"));
     if (method === "GET" && path === "/meta") return json(route, meta);
     if (method === "GET" && path === "/notifications") return json(route, []);
     if (method === "GET" && path === "/agents") return json(route, agents);
@@ -203,6 +235,11 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
     if (method === "GET" && path === "/members") return json(route, members);
     if (method === "GET" && path === "/workspaces/workspace-project/acl") return json(route, workspaceAcl);
     if (method === "GET" && path === "/boxes/box-owned") return json(route, { ...boxes[0], lastEventSeq: 0, activeRunId: null, run: null });
+    if (method === "POST" && path === "/agents") {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      observations.agentCreates.push(body);
+      return json(route, { id: "agent-created", name: body.name, runtimeType: body.runtimeType, version: 1, model: body.model, systemPrompt: body.systemPrompt ?? "", createdAt: NOW, updatedAt: NOW }, 201);
+    }
     if (method === "GET" && path === "/workspaces/workspace-project") return json(route, workspaces[0]);
     if (method === "GET" && createdBox && path === `/boxes/${createdBox.id}`) {
       return json(route, { ...createdBox, lastEventSeq: 0, activeRunId: null, run: null });
@@ -220,9 +257,9 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
         createdAt: NOW
       }, 201);
     }
-
     if (method === "POST" && path === "/boxes") {
       const body = request.postDataJSON() as Record<string, unknown>;
+      const selectedAgent = agents.find((agent) => agent.id === body.agentId);
       observations.boxCreates.push(body);
       createdBox = {
         id: "box-created",
@@ -232,9 +269,10 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
         workspaceId: String(body.workspaceId),
         visibility: "private",
         status: "created",
+        runtimeSessionMode: body.runtimeSessionMode ?? "new",
+        runtimeSessionRef: body.runtimeSessionRef,
         ownerUserId: meta.currentUser.id,
-        runtimeType: "omp",
-        version: 1,
+        runtimeType: selectedAgent?.runtimeType ?? "omp",
         createdAt: NOW,
         updatedAt: NOW
       };
@@ -243,6 +281,7 @@ export async function installAdminApi(page: Page, options: ApiFixtureOptions = {
 
     if (method === "DELETE") {
       observations.deletes.push(path);
+      if (path.startsWith("/hosts/") && requestURL.searchParams.get("cascade") === "true") observations.hostCascadeDeletes.push(path);
       const failure = options.deleteFailures?.[path];
       if (failure) return json(route, { message: failure }, 409);
       return json(route, {});

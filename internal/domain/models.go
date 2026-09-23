@@ -118,22 +118,24 @@ type Workspace struct {
 }
 
 type Box struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organizationId"`
-	Name           string    `json:"name"`
-	AgentID        string    `json:"agentId"`
-	AgentVersionID string    `json:"agentVersionId"`
-	HostID         string    `json:"hostId"`
-	WorkspaceID    string    `json:"workspaceId"`
-	OwnerUserID    string    `json:"ownerUserId"`
-	RuntimeType    string    `json:"runtimeType"`
-	Model          string    `json:"model,omitempty"`
-	Visibility     string    `json:"visibility"`
-	Status         BoxStatus `json:"status"`
-	Version        int64     `json:"version"`
-	LastEventSeq   int64     `json:"lastEventSeq"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID                 string    `json:"id"`
+	OrganizationID     string    `json:"organizationId"`
+	Name               string    `json:"name"`
+	AgentID            string    `json:"agentId"`
+	AgentVersionID     string    `json:"agentVersionId"`
+	HostID             string    `json:"hostId"`
+	WorkspaceID        string    `json:"workspaceId"`
+	OwnerUserID        string    `json:"ownerUserId"`
+	RuntimeType        string    `json:"runtimeType"`
+	Model              string    `json:"model,omitempty"`
+	RuntimeSessionMode string    `json:"runtimeSessionMode"`
+	RuntimeSessionRef  string    `json:"runtimeSessionRef,omitempty"`
+	Visibility         string    `json:"visibility"`
+	Status             BoxStatus `json:"status"`
+	Version            int64     `json:"version"`
+	LastEventSeq       int64     `json:"lastEventSeq"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 type Run struct {
@@ -242,11 +244,13 @@ type CreateWorkspaceInput struct {
 }
 
 type CreateBoxInput struct {
-	Name        string
-	AgentID     string
-	Model       string
-	HostID      string
-	WorkspaceID string
+	Name               string
+	AgentID            string
+	Model              string
+	HostID             string
+	WorkspaceID        string
+	RuntimeSessionMode string
+	RuntimeSessionRef  string
 }
 
 type SendMessageInput struct {

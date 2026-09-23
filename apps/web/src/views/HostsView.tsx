@@ -14,6 +14,7 @@ export function HostsView() {
   const [deletingHost, setDeletingHost] = useState<Host>();
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string>();
+  const [cascadeDelete, setCascadeDelete] = useState(false);
 
   if (resource.loading) return <LoadingState label="Loading host fleet" />;
   if (resource.error && !resource.data) return <ErrorState error={resource.error} retry={resource.reload} />;
@@ -23,12 +24,14 @@ export function HostsView() {
 
   const openDelete = (host: Host) => {
     setDeleteError(undefined);
+    setCascadeDelete(false);
     setDeletingHost(host);
   };
 
   const closeDelete = () => {
     if (deleteBusy) return;
     setDeleteError(undefined);
+    setCascadeDelete(false);
     setDeletingHost(undefined);
   };
 
@@ -38,7 +41,7 @@ export function HostsView() {
     setDeleteBusy(true);
     setDeleteError(undefined);
     try {
-      await api.deleteHost(host.id);
+      await api.deleteHost(host.id, cascadeDelete);
       resource.setData((current) => current?.filter((candidate) => candidate.id !== host.id));
       setDeletingHost(undefined);
     } catch (error) {
@@ -64,7 +67,7 @@ export function HostsView() {
                 <dl className="resource-card__facts">
                   <div><dt>Daemon</dt><dd>{host.daemonVersion || "—"}</dd></div>
                   <div><dt>Last seen</dt><dd>{relativeTime(host.lastSeenAt)}</dd></div>
-                  <div><dt>Capacity</dt><dd>{host.maxActiveBoxes ?? "—"} boxes</dd></div>
+                  <div><dt>Active runtime limit</dt><dd>{host.maxActiveBoxes ?? "—"}</dd></div>
                 </dl>
               </article>
             ))}
@@ -80,10 +83,11 @@ export function HostsView() {
       >
         <div className="confirm-dialog">
           {deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}
-          <InlineAlert tone="warning">{deletingHost?.status === "offline" ? "Hosts with active Boxes or non-archived Workspaces cannot be deleted. A revoked daemon credential cannot reconnect." : "The host must be offline before it can be deleted. Stop agentboxd on that host, refresh this page, then try again."}</InlineAlert>
+          <InlineAlert tone="warning">{deletingHost?.status === "offline" ? cascadeDelete ? "Dependent Boxes will be terminated, Schedules deleted, Workspaces archived, and the Host credential revoked." : "Hosts with active dependencies require the cascade option below. A revoked daemon credential cannot reconnect." : "The host must be offline before it can be deleted. Stop agentboxd on that host, refresh this page, then try again."}</InlineAlert>
+          {deletingHost?.status === "offline" ? <label className="confirm-checkbox"><input type="checkbox" checked={cascadeDelete} onChange={(event) => setCascadeDelete(event.target.checked)} /><span>Also terminate dependent Boxes, delete Schedules, and archive Workspaces.</span></label> : null}
           <div className="modal__actions">
             <Button disabled={deleteBusy} onClick={closeDelete}>Cancel</Button>
-            <Button variant="danger" icon="trash" busy={deleteBusy} disabled={deletingHost?.status !== "offline"} onClick={() => void deleteHost()}>Delete host</Button>
+            <Button variant="danger" icon="trash" busy={deleteBusy} disabled={deletingHost?.status !== "offline"} onClick={() => void deleteHost()}>{cascadeDelete ? "Delete host and dependencies" : "Delete host"}</Button>
           </div>
         </div>
       </Modal>

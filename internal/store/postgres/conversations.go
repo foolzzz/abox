@@ -390,12 +390,13 @@ func claimNextRunTx(ctx context.Context, tx pgx.Tx, boxID string) (domain.Run, d
 }
 
 func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.HostCommand, error) {
-	var organizationID, hostID, runtimeType, workspacePath, model, delivery, messageID, messageText string
+	var organizationID, hostID, runtimeType, workspacePath, model, sessionMode, sessionRef, delivery, messageID, messageText string
 	var daemonInstanceID *string
 	var configSnapshot, presentationContext []byte
 	err := tx.QueryRow(ctx, `
         SELECT b.organization_id, b.host_id, b.runtime_type, w.real_path,
-               COALESCE(b.model_override, av.model, ''), h.current_daemon_instance_id::text,
+               COALESCE(b.model_override, av.model, ''), b.runtime_session_mode,
+               COALESCE(b.runtime_session_ref, ''), h.current_daemon_instance_id::text,
                jsonb_build_object(
                    'agentVersionId', av.id,
                    'systemPrompt', av.system_prompt,
@@ -412,7 +413,7 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
         JOIN messages m ON m.id = r.trigger_message_id
         WHERE r.id = $1 AND b.id = $2
         FOR UPDATE OF r`, runID, boxID).Scan(
-		&organizationID, &hostID, &runtimeType, &workspacePath, &model,
+		&organizationID, &hostID, &runtimeType, &workspacePath, &model, &sessionMode, &sessionRef,
 		&daemonInstanceID, &configSnapshot, &delivery, &messageID, &messageText, &presentationContext,
 	)
 	if err != nil {
@@ -448,10 +449,10 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
 	_, err = tx.Exec(ctx, `
         INSERT INTO runtime_instances(
             id, organization_id, box_id, host_id, runtime_type,
-            daemon_instance_id, status, config_snapshot
-        ) VALUES ($1,$2,$3,$4,$5,$6,'starting',$7)`,
+            daemon_instance_id, status, config_snapshot, session_ref
+        ) VALUES ($1,$2,$3,$4,$5,$6,'starting',$7,$8)`,
 		runtimeInstanceID, organizationID, boxID, hostID, runtimeType,
-		*daemonInstanceID, configSnapshot)
+		*daemonInstanceID, configSnapshot, nullableText(sessionRef))
 	if err != nil {
 		return domain.HostCommand{}, mapError("insert runtime instance", err)
 	}
@@ -470,6 +471,9 @@ func dispatchRunTx(ctx context.Context, tx pgx.Tx, boxID, runID string) (domain.
 			"delivery":            delivery,
 			"presentationContext": json.RawMessage(presentationContext),
 		},
+	}
+	if sessionMode == "resume" && sessionRef != "" {
+		startPayload["sessionRef"] = sessionRef
 	}
 	var runtimeSnapshot struct {
 		SystemPrompt   string `json:"systemPrompt"`
