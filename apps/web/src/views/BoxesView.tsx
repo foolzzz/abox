@@ -383,12 +383,14 @@ function CreateBoxModal({
     setRuntimeSessionMode(session.running ? "attach" : "resume");
     if (!session.workspace) return;
     const matchingWorkspace = workspaces.find((workspace) => workspace.hostId === selectedHostId && workspace.status === "ready" && (workspace.path.replace(/\/+$/, "") || "/") === (session.workspace?.replace(/\/+$/, "") || "/"));
-    if (organizationAdmin) {
-      setPlacementMode("path");
-      setProjectPath(session.workspace);
-    } else if (matchingWorkspace) {
+    if (matchingWorkspace) {
       setPlacementMode("workspace");
       setWorkspaceId(matchingWorkspace.id);
+      setProjectPath("");
+    } else if (organizationAdmin) {
+      setPlacementMode("path");
+      setWorkspaceId("");
+      setProjectPath(session.workspace);
     }
   };
 
@@ -410,7 +412,7 @@ function CreateBoxModal({
         ) : (
           <label className="field"><span>{t("boxes.registeredWorkspace")}</span><select required value={selectedWorkspaceId} onChange={(event) => setWorkspaceId(event.target.value)} disabled={!selectedHostId}><option value="">{t("boxes.selectWorkspace")}</option>{readyWorkspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.path}</option>)}</select>{selectedHostId && readyWorkspaces.length === 0 ? <small className="field__error">{t("boxes.noWorkspace")}</small> : null}</label>
         )}
-        {selectedHost && placementMode === "path" && projectPath.trim() ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{normalizedProjectPath}</strong><small>{selectedHost.name} · {selectedHost.systemHostname || "hostname unavailable"}</small></div><StatusChip status="validation" compact /></div> : null}
+        {selectedHost && placementMode === "path" && projectPath.trim() ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{normalizedProjectPath}</strong><small>{selectedHost.name} · {selectedHost.systemHostname || "hostname unavailable"}</small></div><StatusChip status="validate_on_create" compact /></div> : null}
         {selectedHost && placementMode === "workspace" && selectedWorkspace ? <div className="selection-summary"><Icon name="workspace" /><div><strong>{selectedWorkspace.name}</strong><small>{selectedHost.name} · {selectedHost.systemHostname || "hostname unavailable"} · {selectedWorkspace.path}</small></div>{checkingWorkspaceAccess ? <span className="spinner spinner--small" /> : <StatusChip status={workspaceAccess ?? selectedWorkspace.status} compact />}</div> : null}
         {workspaceAccessError ? <InlineAlert>{workspaceAccessError}</InlineAlert> : null}
         {placementMode === "workspace" && selectedWorkspace && !checkingWorkspaceAccess && !workspaceAccessError && !canUseSelectedWorkspace ? <InlineAlert tone="warning">{t("boxes.viewerWorkspace")}</InlineAlert> : null}
