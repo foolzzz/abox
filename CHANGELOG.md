@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-09-22
+
 ### Added
 
 - Claude Host 探测同时支持已登录的 OAuth/Keychain 凭据和 daemon 环境中的 `ANTHROPIC_API_KEY`；已认证主机自动备份并完成 Claude 交互式 Onboarding 标记，无需逐台重复登录。
@@ -129,7 +131,8 @@
 - Host Credential、幂等 Command、Event Journal/Ack 和 PostgreSQL 约束用于保护控制面与 daemon 通信。
 - Runtime Secret 仅引用 Host 环境，不在 Control Plane 保存明文。
 
-[Unreleased]: https://github.com/foolzzz/abox/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/foolzzz/abox/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/foolzzz/abox/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/foolzzz/abox/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/foolzzz/abox/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/foolzzz/abox/compare/v0.3.0...v0.4.0
