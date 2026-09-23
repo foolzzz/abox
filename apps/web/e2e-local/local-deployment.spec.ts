@@ -152,3 +152,18 @@ test("live API allows duplicate Claude resume references across Boxes", async ({
   }, sessionRef);
   expect(result).toEqual([{ mode: "resume", ref: sessionRef }, { mode: "resume", ref: sessionRef }]);
 });
+
+test("live daemon discovers local Claude sessions", async ({ page }) => {
+  const sessions = await page.evaluate(async () => {
+    const hostResponse = await fetch("/api/v1/hosts");
+    const hosts = await hostResponse.json() as Array<{ id: string; status: string; runtimes: string[] }>;
+    const host = hosts.find((candidate) => candidate.status === "online" && candidate.runtimes.includes("claude"));
+    if (!host) throw new Error("online Claude Host is required");
+    const response = await fetch(`/api/v1/hosts/${host.id}/runtime-sessions?runtime=claude`);
+    if (!response.ok) throw new Error(`session discovery failed: ${response.status}`);
+    return response.json() as Promise<Array<{ sessionRef: string; runtimeType: string; updatedAt: string }>>;
+  });
+  expect(sessions.length).toBeGreaterThan(0);
+  expect(sessions[0].runtimeType).toBe("claude");
+  expect(sessions[0].sessionRef).toMatch(/^[0-9a-f-]{36}$/i);
+});

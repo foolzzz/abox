@@ -245,6 +245,7 @@ func New(config Config) (*Daemon, error) {
 	if err := manager.SetPublisher(client); err != nil {
 		return nil, err
 	}
+	client.SetRuntimeSessionHandler(runtimeSessionDiscovery{})
 	terminal, err := NewTerminalManager(guard, config.TmuxBinary, config.MaxTerminalSessions, func(data *hostv1.TerminalData) error {
 		_, publishErr := client.PublishTerminalData(context.Background(), data)
 		return publishErr

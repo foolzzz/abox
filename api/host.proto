@@ -19,6 +19,7 @@ message HostFrame {
     RuntimeSnapshot runtime_snapshot = 14;
     ArtifactReady artifact_ready = 15;
     TerminalData terminal_data = 16;
+    RuntimeSessionList runtime_session_list = 17;
   }
 }
 
@@ -31,6 +32,7 @@ message ServerFrame {
     ConfigUpdate config_update = 13;
     Ping ping = 14;
     TerminalInput terminal_input = 15;
+    RuntimeSessionQuery runtime_session_query = 16;
   }
 }
 
@@ -157,6 +159,27 @@ message TerminalInput {
   bool terminate = 12;
   string runtime_session_mode = 13;
   string runtime_session_ref = 14;
+}
+
+message RuntimeSessionQuery {
+  string request_id = 1;
+  string runtime_type = 2;
+}
+
+message RuntimeSessionList {
+  string request_id = 1;
+  repeated RuntimeSession sessions = 2;
+  string error = 3;
+}
+
+message RuntimeSession {
+  string session_ref = 1;
+  string runtime_type = 2;
+  string workspace = 3;
+  string name = 4;
+  string status = 5;
+  bool running = 6;
+  int64 updated_unix_millis = 7;
 }
 
 message Welcome {

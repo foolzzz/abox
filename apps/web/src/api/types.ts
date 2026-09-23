@@ -172,6 +172,16 @@ export interface CreateBoxRequest {
   runtimeSessionRef?: string;
 }
 
+export interface RuntimeSession {
+  sessionRef: string;
+  runtimeType: RuntimeType | string;
+  workspace?: string;
+  name: string;
+  status: string;
+  running: boolean;
+  updatedAt: string;
+}
+
 export interface BoxSnapshot extends Box {
   activeRunId?: string | null;
   lastEventSeq: number;

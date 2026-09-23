@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api/client";
-import type { Agent, Box, Host, Member, ResourceRole, Workspace } from "../api/types";
+import type { Agent, Box, Host, Member, ResourceRole, RuntimeSession, Workspace } from "../api/types";
 import { Icon } from "../components/Icon";
 import { useToast } from "../components/Toast";
 import { Button, EmptyState, ErrorState, InlineAlert, LoadingState, Modal, PageHeader, RefreshButton, StatusChip } from "../components/ui";
@@ -227,6 +227,10 @@ function CreateBoxModal({
   const [placementMode, setPlacementMode] = useState<"path" | "workspace">(organizationAdmin ? "path" : "workspace");
   const [runtimeSessionMode, setRuntimeSessionMode] = useState<"new" | "resume">("new");
   const [runtimeSessionRef, setRuntimeSessionRef] = useState("");
+  const [runtimeSessions, setRuntimeSessions] = useState<RuntimeSession[]>([]);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [sessionDiscoveryBusy, setSessionDiscoveryBusy] = useState(false);
+  const [sessionDiscoveryError, setSessionDiscoveryError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const [workspaceAccess, setWorkspaceAccess] = useState<ResourceRole>();
@@ -239,6 +243,9 @@ function CreateBoxModal({
       setPlacementMode(organizationAdmin ? "path" : "workspace");
       setRuntimeSessionMode("new");
       setRuntimeSessionRef("");
+      setSessionSearch("");
+      setRuntimeSessions([]);
+      setSessionDiscoveryError(undefined);
     }
   }, [open, organizationAdmin]);
 
@@ -298,6 +305,33 @@ function CreateBoxModal({
     return () => controller.abort();
   }, [currentUserId, open, organizationAdmin, placementMode, selectedWorkspaceId]);
 
+  useEffect(() => {
+    setSessionDiscoveryError(undefined);
+    if (!open || !organizationAdmin || runtimeSessionMode !== "resume" || !selectedHostId || selectedAgent?.runtimeType !== "claude") {
+      setRuntimeSessions([]);
+      setSessionDiscoveryBusy(false);
+      return;
+    }
+    const controller = new AbortController();
+    setSessionDiscoveryBusy(true);
+    api.listRuntimeSessions(selectedHostId, "claude", controller.signal).then(
+      (sessions) => {
+        if (!controller.signal.aborted) {
+          setRuntimeSessions(sessions);
+          setSessionDiscoveryBusy(false);
+        }
+      },
+      (requestError: unknown) => {
+        if (!controller.signal.aborted) {
+          setSessionDiscoveryError(errorMessage(requestError));
+          setRuntimeSessions([]);
+          setSessionDiscoveryBusy(false);
+        }
+      }
+    );
+    return () => controller.abort();
+  }, [open, organizationAdmin, runtimeSessionMode, selectedHostId, selectedAgent?.runtimeType]);
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (placementMode === "workspace" && !organizationAdmin && workspaceAccess !== "owner" && workspaceAccess !== "operator") return;
@@ -342,6 +376,20 @@ function CreateBoxModal({
     ? organizationAdmin && selectedHostId !== "" && projectPath.trim().startsWith("/")
     : selectedHostId !== "" && selectedWorkspaceId !== "" && canUseSelectedWorkspace;
   const runtimeSessionReady = runtimeSessionMode === "new" || runtimeSessionRef.trim() !== "";
+  const normalizedSessionSearch = sessionSearch.trim().toLowerCase();
+  const filteredRuntimeSessions = runtimeSessions.filter((session) => !normalizedSessionSearch || `${session.name} ${session.workspace ?? ""} ${session.sessionRef}`.toLowerCase().includes(normalizedSessionSearch));
+  const chooseRuntimeSession = (session: RuntimeSession) => {
+    setRuntimeSessionRef(session.sessionRef);
+    if (!session.workspace) return;
+    const matchingWorkspace = workspaces.find((workspace) => workspace.hostId === selectedHostId && workspace.status === "ready" && (workspace.path.replace(/\/+$/, "") || "/") === (session.workspace?.replace(/\/+$/, "") || "/"));
+    if (organizationAdmin) {
+      setPlacementMode("path");
+      setProjectPath(session.workspace);
+    } else if (matchingWorkspace) {
+      setPlacementMode("workspace");
+      setWorkspaceId(matchingWorkspace.id);
+    }
+  };
 
   return (
     <Modal open={open} onClose={onClose} title={t("boxes.createTitle")} description={t("boxes.createDescription")} size="large">
@@ -352,9 +400,9 @@ function CreateBoxModal({
         <label className="field"><span>{t("boxes.stepAgent")}</span><select required value={selectedAgentId} onChange={(event) => { setAgentId(event.target.value); setHostId(""); setWorkspaceId(""); }}><option value="">{t("boxes.selectAgent")}</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.name} · {agent.runtimeType.toUpperCase()}</option>)}</select></label>
         {selectedAgent ? <div className="selection-summary"><Icon name="agent" /><div><strong>{selectedAgent.name}</strong><small>{selectedAgent.model || "Runtime default model"} · version {selectedAgent.version}</small></div><StatusChip status={selectedAgent.runtimeType} compact /></div> : null}
         {selectedAgent?.runtimeType === "claude" ? <fieldset className="segmented-field"><legend>{t("boxes.sessionSource")}</legend><label><input type="radio" name="runtimeSessionMode" checked={runtimeSessionMode === "new"} onChange={() => { setRuntimeSessionMode("new"); setRuntimeSessionRef(""); }} />{t("boxes.sessionNew")}</label><label><input type="radio" name="runtimeSessionMode" checked={runtimeSessionMode === "resume"} onChange={() => setRuntimeSessionMode("resume")} />{t("boxes.sessionResume")}</label></fieldset> : null}
-        {selectedAgent?.runtimeType === "claude" && runtimeSessionMode === "resume" ? <><label className="field"><span>{t("boxes.sessionRef")}</span><input className="mono" required maxLength={256} value={runtimeSessionRef} onChange={(event) => setRuntimeSessionRef(event.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" aria-label={t("boxes.sessionRef")} /><small>{t("boxes.sessionRefHint")}</small></label><InlineAlert tone="warning">{t("boxes.sessionResumeWarning")}</InlineAlert></> : null}
         {selectedAgent && compatibleHosts.length === 0 ? <InlineAlert tone="warning">No online host supports {selectedAgent.runtimeType.toUpperCase()}.</InlineAlert> : null}
         <label className="field"><span>{t("boxes.host")}</span><select required value={selectedHostId} onChange={(event) => { setHostId(event.target.value); setWorkspaceId(""); }} disabled={!selectedAgentId}><option value="">{t("boxes.selectHost")}</option>{compatibleHosts.map((host) => <option value={host.id} key={host.id}>{host.name} · {host.systemHostname || [host.os, host.arch].filter(Boolean).join("/")} · {host.runtimes.join(", ")}</option>)}</select></label>
+        {selectedAgent?.runtimeType === "claude" && runtimeSessionMode === "resume" ? <><label className="field"><span>{t("boxes.sessionRef")}</span><input className="mono" required maxLength={256} value={runtimeSessionRef} onChange={(event) => setRuntimeSessionRef(event.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" aria-label={t("boxes.sessionRef")} /><small>{t("boxes.sessionRefHint")}</small></label>{organizationAdmin ? <div className="session-picker"><label className="field"><span>{t("boxes.sessionSearch")}</span><input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder={t("boxes.sessionSearchPlaceholder")} /></label>{sessionDiscoveryBusy ? <span className="spinner spinner--small" /> : null}{sessionDiscoveryError ? <InlineAlert tone="warning">{t("boxes.sessionDiscoveryFallback")}: {sessionDiscoveryError}</InlineAlert> : null}{!sessionDiscoveryBusy && !sessionDiscoveryError && filteredRuntimeSessions.length === 0 ? <small>{t("boxes.sessionNone")}</small> : null}<div className="session-picker__list">{filteredRuntimeSessions.map((session) => <button type="button" className={runtimeSessionRef === session.sessionRef ? "session-picker__item session-picker__item--selected" : "session-picker__item"} onClick={() => chooseRuntimeSession(session)} key={session.sessionRef} aria-label={`${t("boxes.sessionChoose")} ${session.name}`}><span><strong>{session.name}</strong><small className="mono">{session.workspace || session.sessionRef}</small></span><StatusChip status={session.running ? "running" : "stopped"} compact /></button>)}</div></div> : null}<InlineAlert tone="warning">{t("boxes.sessionResumeWarning")}</InlineAlert></> : null}
         {organizationAdmin ? <fieldset className="segmented-field"><legend>{t("boxes.stepDirectory")}</legend><label><input type="radio" name="placementMode" checked={placementMode === "path"} onChange={() => setPlacementMode("path")} />{t("boxes.pathMode")}</label><label><input type="radio" name="placementMode" checked={placementMode === "workspace"} onChange={() => setPlacementMode("workspace")} />{t("boxes.workspaceMode")}</label></fieldset> : null}
         {placementMode === "path" ? (
           <label className="field"><span>{t("boxes.projectPath")}</span><input className="mono" required value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/Users/name/projects/my-project" /><small>{t("boxes.projectPathHint")}</small></label>

@@ -82,11 +82,12 @@ type Server struct {
 	hostCommandLimit        int
 	replayLimit             int
 
-	events    *eventHub
-	hosts     *hostHub
-	terminals *terminalHub
-	metrics   *metrics
-	router    http.Handler
+	events          *eventHub
+	hosts           *hostHub
+	terminals       *terminalHub
+	runtimeSessions *runtimeSessionHub
+	metrics         *metrics
+	router          http.Handler
 }
 
 func New(options Options) (*Server, error) {
@@ -204,6 +205,7 @@ func New(options Options) (*Server, error) {
 		events:                  newEventHub(options.SSESubscriberBuffer, metricSet),
 		hosts:                   newHostHub(metricSet),
 		terminals:               newTerminalHub(),
+		runtimeSessions:         newRuntimeSessionHub(),
 		metrics:                 metricSet,
 	}
 	server.router = server.routes()
@@ -268,6 +270,7 @@ func (s *Server) routes() http.Handler {
 		api.With(s.requireRole(roleUser)).Get("/hosts", s.handleListHosts)
 		api.With(s.requireRole(roleUser)).Get("/hosts/{hostID}", s.handleGetHost)
 		api.With(s.requireRole(roleAdmin)).Delete("/hosts/{hostID}", s.handleDeleteHost)
+		api.With(s.requireRole(roleAdmin)).Get("/hosts/{hostID}/runtime-sessions", s.handleListRuntimeSessions)
 
 		api.With(s.requireRole(roleUser)).Get("/workspaces", s.handleListWorkspaces)
 		api.With(s.requireRole(roleUser)).Get("/workspaces/{workspaceID}", s.handleGetWorkspace)

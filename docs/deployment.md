@@ -1,6 +1,6 @@
 # AgentBox 部署指南
 
-本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.5.0`。
+本文说明如何使用正式 Release 在 macOS 或 Linux 上部署 AgentBox Control Plane 与 Host daemon。当前示例版本为 `v0.6.0`。
 
 ## 1. 部署拓扑
 
@@ -72,16 +72,16 @@ claude --version
 Release 页面：
 
 ```text
-https://github.com/foolzzz/abox/releases/tag/v0.5.0
+https://github.com/foolzzz/abox/releases/tag/v0.6.0
 ```
 
 根据操作系统和架构下载：
 
 ```text
-agentbox-0.5.0-darwin-arm64.tar.gz
-agentbox-0.5.0-darwin-amd64.tar.gz
-agentbox-0.5.0-linux-arm64.tar.gz
-agentbox-0.5.0-linux-amd64.tar.gz
+agentbox-0.6.0-darwin-arm64.tar.gz
+agentbox-0.6.0-darwin-amd64.tar.gz
+agentbox-0.6.0-linux-arm64.tar.gz
+agentbox-0.6.0-linux-amd64.tar.gz
 checksums.txt
 ```
 
@@ -90,13 +90,13 @@ checksums.txt
 macOS：
 
 ```bash
-shasum -a 256 agentbox-0.5.0-darwin-arm64.tar.gz
+shasum -a 256 agentbox-0.6.0-darwin-arm64.tar.gz
 ```
 
 Linux：
 
 ```bash
-sha256sum agentbox-0.5.0-linux-amd64.tar.gz
+sha256sum agentbox-0.6.0-linux-amd64.tar.gz
 ```
 
 输出必须与 `checksums.txt` 中对应文件一致。
@@ -104,8 +104,8 @@ sha256sum agentbox-0.5.0-linux-amd64.tar.gz
 解压：
 
 ```bash
-tar -xzf agentbox-0.5.0-<os>-<arch>.tar.gz
-cd agentbox-0.5.0-<os>-<arch>
+tar -xzf agentbox-0.6.0-<os>-<arch>.tar.gz
+cd agentbox-0.6.0-<os>-<arch>
 ```
 
 ## 4. 安装文件
@@ -187,7 +187,7 @@ docker exec agentbox-postgres pg_isready -U agentbox -d agentbox
   "publicUrl": "http://127.0.0.1:8080",
   "enrollmentToken": "<random-enrollment-token>",
   "webDir": "~/.agentbox/web",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "approvalPollInterval": "1s",
   "hibernationPollInterval": "30s",
   "schedulePollInterval": "1s",
@@ -374,6 +374,10 @@ launchctl kickstart -k "gui/$(id -u)/io.agentbox.daemon"
 ### 8.5 恢复本机 Claude Session
 
 新建 Claude Box 时可以选择“恢复已有会话”并填写 Claude Session UUID。AgentBox 在所选 Host 上启动：
+
+Admin 选择 Host 后，AgentBox 会通过该 Host 的 daemon 查询本地 Claude Session，并按名称、Workspace 或 Session ID 搜索。选择结果会自动填写 UUID；若 Session 记录包含 Workspace，Admin 路径模式会自动填充该路径。发现接口只读取 Session ID、Workspace、名称、更新时间和运行状态，不读取对话正文。
+
+如果 Host Offline、发现超时或 Claude 本地格式无法解析，页面保留手动 Session ID 输入，不阻塞恢复流程。普通 User 不获得 Host 全量 Session 列表，仍可在有 Workspace 权限时手动填写已知 Session ID。
 
 ```bash
 claude --resume <session-id>
