@@ -277,6 +277,8 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] Agent Terminal、Command Terminal、Subagent、Todo、Artifact 和 Diff 在 Web 中有独立入口；不存在重复的结构化聊天 Console。
 - [x] Command Terminal 保持临时 PTY 语义。
 - [x] 删除 Box 会从列表隐藏 Session，并终止 Managed Runtime 和 tmux Agent Terminal。
+- [x] Agent Terminal 和 Command Terminal 支持浏览器页面内宽屏模式：覆盖应用侧栏和页面标题但不调用浏览器 Fullscreen API，可通过工具栏按钮或 `Esc` 退出，并自动重新计算 PTY 行列数。
+- [x] Admin 新建 Box 时填写 Host 本地路径；若该 Host 尚未注册此路径，Web 自动创建并等待 Workspace 验证成功，再使用新 Workspace 创建 Box；已注册路径直接复用。
 - [ ] 真实手机/Tailnet 网络切换后重新 attach 同一 tmux Session。
 
 ### 13.8 2026-09-18 UI 删除与创建回归待办
@@ -289,7 +291,7 @@ Web 在每次发送 Prompt/Steer/Follow-up 时提交 Presentation Context：
 - [x] **一步创建 Agent Box**：创建页在同一表单中同时提供名称、Agent、目标 Host、项目目录/Workspace，并且仅有一次提交动作；不存在分步器，成功提交后创建完整绑定的 Box。
 - [x] **PWA 更新激活**：新 Web 构建发布后，已打开或再次访问的 PWA 客户端自动激活等待中的 Service Worker，并自动重新加载到最新构建，无需用户手动清缓存或关闭全部标签页。
 - [x] **Runtime 可用性恢复**：Server Frame Idempotency Store 采用有界滚动保留，不因长期心跳耗尽容量；Control Plane 重启后 daemon 通过 gRPC keepalive 和主动重连恢复连接；Agent 创建弹窗打开期间自动刷新 Host Runtime 状态，在线 Host 的 OMP、Codex、Claude 在 E2E 等待预算内重新显示为可用。
-- [x] **浏览器 E2E 回归覆盖**：真实 Chrome 用稳定的可访问名称定位并执行 Box 单项/批量删除、Host、Agent Definition、Workspace 删除流程（包括权限、Host online/offline、批量部分失败和受保护删除冲突），并覆盖一步创建 Agent Box、Runtime 可用性/自动刷新与 PWA 新版本自动激活/重载；隔离 Fixture Suite `npm --workspace apps/web run test:e2e` 共 11 项通过，真实本机部署 Suite `npm --workspace apps/web run test:e2e:local` 共 3 项通过。
+- [x] **浏览器 E2E 回归覆盖**：真实 Chrome 用稳定的可访问名称定位并执行 Box 单项/批量删除、Host、Agent Definition、Workspace 删除流程（包括权限、Host online/offline、批量部分失败和受保护删除冲突），并覆盖一步创建 Agent Box、未注册路径自动创建 Workspace、Terminal 页面内宽屏、Runtime 可用性/自动刷新与 PWA 新版本自动激活/重载；隔离 Fixture Suite `npm --workspace apps/web run test:e2e` 共 12 项通过，真实本机部署 Suite `npm --workspace apps/web run test:e2e:local` 共 3 项通过。
 
 
 ## 14. 范围外

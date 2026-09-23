@@ -9,6 +9,7 @@
 ### Added
 
 - 新增 `docs/deployment.md`，覆盖 Control Plane/Worker 拓扑、macOS LaunchAgent、Linux systemd user service、PostgreSQL、OMP/Codex/Claude 认证、升级、回滚、健康检查和卸载。
+- Agent Terminal 和 Command Terminal 新增浏览器页面内宽屏模式；不调用 Fullscreen API，支持工具栏退出和 `Esc` 快捷退出。
 
 ## [0.4.3] - 2026-09-22
 
