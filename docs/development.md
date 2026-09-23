@@ -1,5 +1,7 @@
 # Local Development
 
+正式 Release 的 macOS/Linux 部署、Runtime 认证、升级和卸载流程见 [部署指南](deployment.md)。
+
 ## Prerequisites
 
 - Go 1.24+
