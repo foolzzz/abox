@@ -49,3 +49,14 @@ func TestAgentRuntimeCommandRejectsResumeForOtherRuntimes(t *testing.T) {
 		t.Fatal("expected non-Claude resume to fail")
 	}
 }
+
+func TestAgentRuntimeCommandAttachesClaudeBackgroundSession(t *testing.T) {
+	command, err := agentRuntimeCommand("claude", "", "attach", "3f8f5ddb-c916-421b-8e21-4423a0a96af6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"claude", "attach", "3f8f5ddb-c916-421b-8e21-4423a0a96af6"}
+	if strings.Join(command, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("command = %#v, want %#v", command, want)
+	}
+}

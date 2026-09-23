@@ -164,6 +164,8 @@ message TerminalInput {
 message RuntimeSessionQuery {
   string request_id = 1;
   string runtime_type = 2;
+  string action = 3;
+  string session_ref = 4;
 }
 
 message RuntimeSessionList {

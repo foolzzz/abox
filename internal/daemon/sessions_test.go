@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	hostv1 "agentbox/api"
 )
 
 func TestDiscoverClaudeSessionsIncludesStoppedAndRunningSessions(t *testing.T) {
@@ -51,5 +53,27 @@ func TestDiscoverClaudeSessionsIncludesStoppedAndRunningSessions(t *testing.T) {
 	}
 	if !byRef[runningRef] {
 		t.Fatal("running session reported stopped")
+	}
+}
+
+func TestRuntimeSessionDiscoveryStopsClaudeSession(t *testing.T) {
+	directory := t.TempDir()
+	recordPath := filepath.Join(directory, "record")
+	binary := filepath.Join(directory, "claude")
+	script := "#!/bin/sh\nprintf '%s %s' \"$1\" \"$2\" > '" + recordPath + "'\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	handler := runtimeSessionDiscovery{claudeBinary: binary}
+	result := handler.HandleRuntimeSessionQuery(context.Background(), &hostv1.RuntimeSessionQuery{RequestId: "request", RuntimeType: "claude", Action: "stop", SessionRef: "shared-session"})
+	if result.GetError() != "" {
+		t.Fatalf("stop session: %s", result.GetError())
+	}
+	content, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "stop shared-session" {
+		t.Fatalf("command = %q", content)
 	}
 }

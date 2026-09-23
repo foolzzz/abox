@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,10 +21,30 @@ const (
 	maxClaudeSessionLineBytes   = 1 << 20
 )
 
-type runtimeSessionDiscovery struct{}
+type runtimeSessionDiscovery struct {
+	claudeBinary string
+}
 
-func (runtimeSessionDiscovery) HandleRuntimeSessionQuery(ctx context.Context, query *hostv1.RuntimeSessionQuery) *hostv1.RuntimeSessionList {
+func (d runtimeSessionDiscovery) HandleRuntimeSessionQuery(ctx context.Context, query *hostv1.RuntimeSessionQuery) *hostv1.RuntimeSessionList {
 	result := &hostv1.RuntimeSessionList{RequestId: query.GetRequestId()}
+	if strings.TrimSpace(query.GetAction()) == "stop" {
+		reference := strings.TrimSpace(query.GetSessionRef())
+		if reference == "" {
+			result.Error = "session reference is required"
+			return result
+		}
+		binary := strings.TrimSpace(d.claudeBinary)
+		if binary == "" {
+			binary = "claude"
+		}
+		if output, err := exec.CommandContext(ctx, binary, "stop", reference).CombinedOutput(); err != nil {
+			result.Error = strings.TrimSpace(string(output))
+			if result.Error == "" {
+				result.Error = err.Error()
+			}
+		}
+		return result
+	}
 	if strings.TrimSpace(query.GetRuntimeType()) != "claude" {
 		result.Error = "session discovery is currently supported only for Claude"
 		return result

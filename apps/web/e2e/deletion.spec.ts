@@ -208,6 +208,23 @@ test("duplicate Claude session references can be resumed by multiple Boxes", asy
   ]);
 });
 
+test("shared Claude session supports Box detach without global stop", async ({ page }) => {
+  const api = await installAdminApi(page);
+  await page.goto("/boxes/box-shared-a/agent-terminal");
+  await expect(page.getByText(/Shared session · 2 attachments/)).toBeVisible();
+  await expect(page.getByText(/Input: shared/)).toBeVisible();
+  await page.getByRole("button", { name: "Detach Box", exact: true }).click();
+  expect(api.detachedSessions).toEqual(["box-shared-a"]);
+  expect(api.stoppedSessions).toEqual([]);
+});
+
+test("admin can stop a shared Claude session for every attachment", async ({ page }) => {
+  const api = await installAdminApi(page);
+  await page.goto("/boxes/box-shared-a/agent-terminal");
+  await page.getByRole("button", { name: "Stop for everyone", exact: true }).click();
+  expect(api.stoppedSessions).toEqual(["box-shared-a"]);
+});
+
 test("Agent creation hides System Prompt and prefills Runtime model defaults", async ({ page }) => {
   const api = await installAdminApi(page);
   await page.goto("/agents?create=1");
@@ -233,8 +250,11 @@ test("Claude session picker searches local sessions and maps the Workspace path"
   await search.fill("Other");
   await expect(dialog.getByRole("button", { name: "Choose session Project Session", exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Choose session Other Session", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Choose session Other Session", exact: true }).click();
+  await expect(dialog.getByRole("radio", { name: "Attach running session", exact: true })).toBeChecked();
   await search.fill("");
   await dialog.getByRole("button", { name: "Choose session Project Session", exact: true }).click();
+  await expect(dialog.getByRole("radio", { name: "Resume an existing session", exact: true })).toBeChecked();
   await expect(dialog.getByLabel("Claude session ID", { exact: true })).toHaveValue("11111111-1111-4111-8111-111111111111");
   await expect(dialog.getByLabel("Local project directory")).toHaveValue("/srv/project");
 });

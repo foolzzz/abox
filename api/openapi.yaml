@@ -200,6 +200,43 @@ paths:
                 type: array
                 items: {$ref: '#/components/schemas/RuntimeSession'}
         '503': {description: Host is offline or discovery timed out}
+  /boxes/{boxId}/runtime-session/attachments:
+    parameters:
+      - name: boxId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      operationId: listRuntimeSessionAttachments
+      responses:
+        '200':
+          description: Active attachments visible to the caller
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/RuntimeSessionAttachment'}
+  /boxes/{boxId}/runtime-session/detach:
+    parameters:
+      - name: boxId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      operationId: detachRuntimeSession
+      responses:
+        '204': {description: Box detached without stopping the shared Runtime session}
+  /boxes/{boxId}/runtime-session/stop:
+    parameters:
+      - name: boxId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      operationId: stopRuntimeSession
+      responses:
+        '204': {description: Shared Runtime session stopped and all attachments detached}
+        '403': {description: Organization Admin required}
   /workspaces:
     get:
       operationId: listWorkspaces
@@ -543,7 +580,7 @@ components:
         visibility: {enum: [private, org]}
         status: {type: string}
         runtimeType: {type: string}
-        runtimeSessionMode: {enum: [new, resume]}
+        runtimeSessionMode: {enum: [new, resume, attach]}
         runtimeSessionRef: {type: string, maxLength: 256}
         updatedAt: {type: string, format: date-time}
     CreateBoxRequest:
@@ -555,7 +592,7 @@ components:
         model: {type: string, maxLength: 128}
         hostId: {type: string, format: uuid}
         workspaceId: {type: string, format: uuid}
-        runtimeSessionMode: {enum: [new, resume]}
+        runtimeSessionMode: {enum: [new, resume, attach]}
         runtimeSessionRef: {type: string, maxLength: 256}
     RuntimeSession:
       type: object
@@ -568,6 +605,21 @@ components:
         status: {type: string}
         running: {type: boolean}
         updatedAt: {type: string, format: date-time}
+    RuntimeSessionAttachment:
+      type: object
+      required: [id, boxId, boxName, hostId, runtimeType, sessionRef, attachMode, inputPolicy, status, attachedAt]
+      properties:
+        id: {type: string, format: uuid}
+        boxId: {type: string, format: uuid}
+        boxName: {type: string}
+        hostId: {type: string, format: uuid}
+        runtimeType: {type: string}
+        sessionRef: {type: string}
+        attachMode: {enum: [resume, attach]}
+        inputPolicy: {enum: [shared, single_writer]}
+        status: {enum: [active, detached]}
+        attachedAt: {type: string, format: date-time}
+        detachedAt: {type: [string, 'null'], format: date-time}
     BoxSnapshot:
       allOf:
         - {$ref: '#/components/schemas/Box'}

@@ -37,6 +37,9 @@ type Store interface {
 
 	DeleteWorkspace(ctx context.Context, user domain.User, workspaceID string) error
 	ListWorkspaces(ctx context.Context, user domain.User) ([]domain.Workspace, error)
+	ListRuntimeSessionAttachments(ctx context.Context, user domain.User, boxID string) ([]domain.RuntimeSessionAttachment, error)
+	DetachRuntimeSession(ctx context.Context, user domain.User, boxID string) error
+	StopRuntimeSession(ctx context.Context, user domain.User, boxID string) ([]domain.Box, error)
 	CreateWorkspace(ctx context.Context, user domain.User, input domain.CreateWorkspaceInput) (domain.Workspace, *domain.HostCommand, error)
 	GetWorkspace(ctx context.Context, user domain.User, id string) (domain.Workspace, error)
 	GetWorkspaceForOrganization(ctx context.Context, organizationID, id string) (domain.Workspace, error)

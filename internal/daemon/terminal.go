@@ -208,6 +208,14 @@ func (m *TerminalManager) ensureAgentSession(ctx context.Context, sessionName, w
 }
 
 func agentRuntimeCommand(runtimeType, model, sessionMode, sessionRef string) ([]string, error) {
+	sessionMode = strings.ToLower(strings.TrimSpace(sessionMode))
+	sessionRef = strings.TrimSpace(sessionRef)
+	if sessionMode == "attach" {
+		if runtimeType != "claude" || sessionRef == "" {
+			return nil, errors.New("claude attach requires a session reference")
+		}
+		return []string{"claude", "attach", sessionRef}, nil
+	}
 	var command []string
 	switch runtimeType {
 	case "omp":
@@ -219,8 +227,6 @@ func agentRuntimeCommand(runtimeType, model, sessionMode, sessionRef string) ([]
 	default:
 		return nil, fmt.Errorf("runtime %q does not support native Agent Terminal", runtimeType)
 	}
-	sessionMode = strings.ToLower(strings.TrimSpace(sessionMode))
-	sessionRef = strings.TrimSpace(sessionRef)
 	if sessionMode == "resume" {
 		if runtimeType != "claude" || sessionRef == "" {
 			return nil, errors.New("claude resume requires a session reference")

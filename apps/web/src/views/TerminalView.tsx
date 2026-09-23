@@ -6,7 +6,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { api, errorMessage } from "../api/client";
-import type { RuntimeType } from "../api/types";
+import type { RuntimeSessionAttachment, RuntimeType } from "../api/types";
 import { Icon } from "../components/Icon";
 import { useToast } from "../components/Toast";
 import { Button, InlineAlert, Modal, StatusChip } from "../components/ui";
@@ -48,6 +48,8 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
   const [visibilityBusy, setVisibilityBusy] = useState(false);
   const [sessionCopied, setSessionCopied] = useState(false);
   const [widescreen, setWidescreen] = useState(false);
+  const [sessionActionBusy, setSessionActionBusy] = useState(false);
+  const [sessionActionError, setSessionActionError] = useState<string>();
   const context = useResource(async (signal) => {
     const [box, hosts, workspaces] = await Promise.all([api.getBox(boxId, signal), api.listHosts(signal), api.listWorkspaces(signal)]);
     return {
@@ -56,6 +58,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
       workspace: workspaces.find((workspace) => workspace.id === box.workspaceId)
     };
   }, [boxId]);
+  const attachments = useResource<RuntimeSessionAttachment[]>((signal) => api.listRuntimeSessionAttachments(boxId, signal), [boxId]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -239,6 +242,36 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
       setVisibilityBusy(false);
     }
   };
+  const detachRuntimeSession = async () => {
+    setSessionActionBusy(true);
+    setSessionActionError(undefined);
+    try {
+      await api.detachRuntimeSession(boxId);
+      context.setData((current) => current ? { ...current, box: { ...current.box, runtimeSessionMode: "new", runtimeSessionRef: undefined } } : current);
+      attachments.reload();
+      setConnectionGeneration((value) => value + 1);
+      notify(t("terminal.sessionDetached"));
+    } catch (requestError) {
+      setSessionActionError(errorMessage(requestError));
+    } finally {
+      setSessionActionBusy(false);
+    }
+  };
+  const stopRuntimeSession = async () => {
+    setSessionActionBusy(true);
+    setSessionActionError(undefined);
+    try {
+      await api.stopRuntimeSession(boxId);
+      context.setData((current) => current ? { ...current, box: { ...current.box, runtimeSessionMode: "resume" } } : current);
+      attachments.reload();
+      setConnectionGeneration((value) => value + 1);
+      notify(t("terminal.sessionStopped"));
+    } catch (requestError) {
+      setSessionActionError(errorMessage(requestError));
+    } finally {
+      setSessionActionBusy(false);
+    }
+  };
   const runtimeType = context.data?.box.runtimeType as RuntimeType | undefined;
   const modelSuggestions = runtimeType ? meta?.runtimeModels[runtimeType] ?? [] : [];
   const terminalSessionID = `abox-agent-${boxId}`;
@@ -258,7 +291,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
           <p>{t(isAgentTerminal ? "terminal.agentDescription" : "terminal.commandDescription")}</p>
           <dl className="terminal-context"><div><dt>{t("box.host")}</dt><dd>{context.data?.host ? `${context.data.host.name} · ${context.data.host.systemHostname || "hostname unavailable"}` : "—"}</dd></div><div><dt>{t("box.workspace")}</dt><dd className="mono" title={context.data?.workspace?.path}>{context.data?.workspace?.path ?? "—"}</dd></div></dl>
         </div>
-        <div className="terminal-heading__actions">{isAgentTerminal ? <button className="terminal-session-id" type="button" onClick={() => void copySessionID()} title="Copy session_id"><span>session_id</span><code>{terminalSessionID}</code><Icon name="copy" size={14} />{sessionCopied ? <b>Copied</b> : null}</button> : null}<StatusChip status={status} />{isAgentTerminal && canManageBox ? <Button icon="edit" onClick={() => { setModelValue(context.data?.box.model ?? ""); setModelOpen(true); }}>Model: {context.data?.box.model || "default"}</Button> : null}{canManageBox ? <Button icon="share" busy={visibilityBusy} onClick={() => void toggleVisibility()}>{context.data?.box.visibility === "org" ? "Organization visible" : "Private"}</Button> : null}<Button icon="refresh" onClick={() => setConnectionGeneration((value) => value + 1)}>{t("terminal.reconnect")}</Button><Button icon="expand" onClick={() => void toggleFullscreen()}>{t("terminal.fullscreen")}</Button>{canDelete ? <Button variant="danger" icon="trash" onClick={() => setDeleteOpen(true)}>{t("box.delete")}</Button> : null}</div>
+        <div className="terminal-heading__actions">{isAgentTerminal ? <button className="terminal-session-id" type="button" onClick={() => void copySessionID()} title="Copy session_id"><span>session_id</span><code>{terminalSessionID}</code><Icon name="copy" size={14} />{sessionCopied ? <b>Copied</b> : null}</button> : null}<StatusChip status={status} />{context.data?.box.runtimeSessionMode && context.data.box.runtimeSessionMode !== "new" ? <span className="status-chip status-chip--neutral">{t("terminal.sharedSession", { count: attachments.data?.length ?? 0 })} · {t("terminal.sharedInput")}</span> : null}{isAgentTerminal && canManageBox ? <Button icon="edit" onClick={() => { setModelValue(context.data?.box.model ?? ""); setModelOpen(true); }}>Model: {context.data?.box.model || "default"}</Button> : null}{canManageBox ? <Button icon="share" busy={visibilityBusy} onClick={() => void toggleVisibility()}>{context.data?.box.visibility === "org" ? "Organization visible" : "Private"}</Button> : null}{context.data?.box.runtimeSessionMode && context.data.box.runtimeSessionMode !== "new" && canManageBox ? <Button busy={sessionActionBusy} onClick={() => void detachRuntimeSession()}>{t("terminal.detachSession")}</Button> : null}{context.data?.box.runtimeSessionMode && context.data.box.runtimeSessionMode !== "new" && roleAtLeast(currentUser?.role, "admin") ? <Button variant="danger" busy={sessionActionBusy} onClick={() => void stopRuntimeSession()}>{t("terminal.stopSharedSession")}</Button> : null}<Button icon="refresh" onClick={() => setConnectionGeneration((value) => value + 1)}>{t("terminal.reconnect")}</Button><Button icon="expand" onClick={() => void toggleFullscreen()}>{t("terminal.fullscreen")}</Button>{canDelete ? <Button variant="danger" icon="trash" onClick={() => setDeleteOpen(true)}>{t("box.delete")}</Button> : null}</div>
       </header>
       <nav className="box-panel-nav" aria-label={t("shell.boxOutput")}>
         <Link className={isAgentTerminal ? "box-panel-nav__item box-panel-nav__item--active" : "box-panel-nav__item"} to={`/boxes/${boxId}/agent-terminal`}><Icon name="terminal" /><span>{t("box.agentTerminal")}</span></Link>
@@ -271,6 +304,7 @@ export function TerminalView({ boxId, mode }: { boxId: string; mode: "agent" | "
       {error ? <div className="stream-warning" role="alert">{error}</div> : null}
       {deleteError ? <InlineAlert>{deleteError}</InlineAlert> : null}
       {settingsError ? <InlineAlert>{settingsError}</InlineAlert> : null}
+      {sessionActionError ? <InlineAlert>{sessionActionError}</InlineAlert> : null}
       <section className="terminal-surface" aria-label={t(isAgentTerminal ? "terminal.agentAria" : "terminal.commandAria")} ref={surface}>
         <div className="terminal-toolbar"><label><Icon name="search" /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={handleSearchKey} placeholder={t("terminal.search")} /></label><button type="button" onClick={searchTerminal}>{t("terminal.findNext")}</button><button type="button" aria-pressed={widescreen} onClick={() => setWidescreen((value) => !value)}><Icon name="expand" size={14} />{t(widescreen ? "terminal.exitWidescreen" : "terminal.widescreen")}</button></div>
         <div className="terminal-container" ref={container} />

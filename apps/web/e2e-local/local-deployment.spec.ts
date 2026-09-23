@@ -167,3 +167,34 @@ test("live daemon discovers local Claude sessions", async ({ page }) => {
   expect(sessions[0].runtimeType).toBe("claude");
   expect(sessions[0].sessionRef).toMatch(/^[0-9a-f-]{36}$/i);
 });
+
+test("live API persists duplicate shared attachments and detaches one Box only", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const request = async (path: string, init?: RequestInit) => {
+      const response = await fetch(`/api/v1${path}`, init);
+      if (!response.ok) throw new Error(`${init?.method ?? "GET"} ${path} failed: ${response.status}`);
+      return response.status === 204 ? undefined : response.json();
+    };
+    const [hosts, workspaces] = await Promise.all([request("/hosts"), request("/workspaces")]);
+    const host = hosts.find((candidate: { status: string; runtimes: string[] }) => candidate.status === "online" && candidate.runtimes.includes("claude"));
+    const workspace = workspaces.find((candidate: { hostId: string; status: string }) => candidate.hostId === host?.id && candidate.status === "ready");
+    if (!host || !workspace) throw new Error("shared attach E2E requires an online Claude Host and ready Workspace");
+    const suffix = Date.now();
+    const sessionRef = `shared-e2e-${suffix}`;
+    const agent = await request("/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `Shared E2E Agent ${suffix}`, runtimeType: "claude", model: "claude-opus-4-6", systemPrompt: "" }) });
+    const boxes: Array<{ id: string }> = [];
+    try {
+      for (const part of ["A", "B"]) {
+        boxes.push(await request("/boxes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `Shared E2E ${suffix} ${part}`, agentId: agent.id, hostId: host.id, workspaceId: workspace.id, runtimeSessionMode: "attach", runtimeSessionRef: sessionRef }) }));
+      }
+      const before = await request(`/boxes/${boxes[0].id}/runtime-session/attachments`);
+      await request(`/boxes/${boxes[0].id}/runtime-session/detach`, { method: "POST" });
+      const after = await request(`/boxes/${boxes[1].id}/runtime-session/attachments`);
+      return { before: before.length, after: after.length };
+    } finally {
+      for (const box of boxes) await request(`/boxes/${box.id}`, { method: "DELETE" });
+      await request(`/agents/${agent.id}`, { method: "DELETE" });
+    }
+  });
+  expect(result).toEqual({ before: 2, after: 1 });
+});

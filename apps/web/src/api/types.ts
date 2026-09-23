@@ -154,7 +154,7 @@ export interface Box {
   status: BoxStatus;
   ownerUserId?: string;
   runtimeType?: RuntimeType | string;
-  runtimeSessionMode?: "new" | "resume";
+  runtimeSessionMode?: "new" | "resume" | "attach";
   runtimeSessionRef?: string;
   version?: number;
   lastEventSeq?: number;
@@ -168,7 +168,7 @@ export interface CreateBoxRequest {
   model?: string;
   hostId: string;
   workspaceId: string;
-  runtimeSessionMode?: "new" | "resume";
+  runtimeSessionMode?: "new" | "resume" | "attach";
   runtimeSessionRef?: string;
 }
 
@@ -180,6 +180,20 @@ export interface RuntimeSession {
   status: string;
   running: boolean;
   updatedAt: string;
+}
+
+export interface RuntimeSessionAttachment {
+  id: string;
+  boxId: string;
+  boxName: string;
+  hostId: string;
+  runtimeType: string;
+  sessionRef: string;
+  attachMode: "resume" | "attach";
+  inputPolicy: "shared" | "single_writer";
+  status: "active" | "detached";
+  attachedAt: string;
+  detachedAt?: string | null;
 }
 
 export interface BoxSnapshot extends Box {

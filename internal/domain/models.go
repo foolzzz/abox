@@ -138,6 +138,20 @@ type Box struct {
 	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
+type RuntimeSessionAttachment struct {
+	ID          string     `json:"id"`
+	BoxID       string     `json:"boxId"`
+	BoxName     string     `json:"boxName"`
+	HostID      string     `json:"hostId"`
+	RuntimeType string     `json:"runtimeType"`
+	SessionRef  string     `json:"sessionRef"`
+	AttachMode  string     `json:"attachMode"`
+	InputPolicy string     `json:"inputPolicy"`
+	Status      string     `json:"status"`
+	AttachedAt  time.Time  `json:"attachedAt"`
+	DetachedAt  *time.Time `json:"detachedAt,omitempty"`
+}
+
 type Run struct {
 	ID                string     `json:"id"`
 	OrganizationID    string     `json:"organizationId"`
